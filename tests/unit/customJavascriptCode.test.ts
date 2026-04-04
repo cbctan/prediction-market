@@ -81,6 +81,10 @@ describe('custom javascript code helpers', () => {
   it('maps pathname buckets and enables scripts only on allowed pages', () => {
     expect(resolveCustomJavascriptCodePageBucket('/')).toBe('home')
     expect(resolveCustomJavascriptCodePageBucket('/portfolio')).toBe('portfolio')
+    expect(resolveCustomJavascriptCodePageBucket('/settings')).toBe('settings')
+    expect(resolveCustomJavascriptCodePageBucket('/settings/trading')).toBe('settings')
+    expect(resolveCustomJavascriptCodePageBucket('/docs')).toBe('docs')
+    expect(resolveCustomJavascriptCodePageBucket('/docs/users')).toBe('docs')
     expect(resolveCustomJavascriptCodePageBucket('/admin/theme')).toBe('admin')
     expect(resolveCustomJavascriptCodePageBucket('/event')).toBe('other')
     expect(resolveCustomJavascriptCodePageBucket('/event/will-btc-rise')).toBe('event')
@@ -91,6 +95,12 @@ describe('custom javascript code helpers', () => {
     expect(isCustomJavascriptCodeEnabledOnPathname({
       disabledOn: ['event'],
     }, '/event/will-btc-rise')).toBe(false)
+    expect(isCustomJavascriptCodeEnabledOnPathname({
+      disabledOn: ['settings'],
+    }, '/settings/trading')).toBe(false)
+    expect(isCustomJavascriptCodeEnabledOnPathname({
+      disabledOn: ['docs'],
+    }, '/docs/users')).toBe(false)
     expect(isCustomJavascriptCodeEnabledOnPathname({
       disabledOn: ['portfolio'],
     }, '/')).toBe(true)

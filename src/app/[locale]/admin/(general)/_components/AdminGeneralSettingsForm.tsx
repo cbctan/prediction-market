@@ -331,6 +331,8 @@ export default function AdminGeneralSettingsForm({
     { value: 'home' as const, label: t('Home') },
     { value: 'event' as const, label: '/event' },
     { value: 'portfolio' as const, label: '/portfolio' },
+    { value: 'settings' as const, label: '/settings' },
+    { value: 'docs' as const, label: '/docs' },
     { value: 'admin' as const, label: '/admin' },
   ]), [t])
 

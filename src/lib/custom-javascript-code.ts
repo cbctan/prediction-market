@@ -5,7 +5,14 @@ export const MAX_CUSTOM_JAVASCRIPT_CODES = 12
 export const MAX_CUSTOM_JAVASCRIPT_CODE_NAME_LENGTH = 80
 export const MAX_CUSTOM_JAVASCRIPT_CODE_SNIPPET_LENGTH = 20_000
 
-export const CUSTOM_JAVASCRIPT_CODE_DISABLE_PAGE_OPTIONS = ['home', 'event', 'portfolio', 'admin'] as const
+export const CUSTOM_JAVASCRIPT_CODE_DISABLE_PAGE_OPTIONS = [
+  'home',
+  'event',
+  'portfolio',
+  'settings',
+  'docs',
+  'admin',
+] as const
 export type CustomJavascriptCodeDisablePage = typeof CUSTOM_JAVASCRIPT_CODE_DISABLE_PAGE_OPTIONS[number]
 export type CustomJavascriptCodePageBucket = CustomJavascriptCodeDisablePage | 'other'
 export type CustomJavascriptCodeAttributeValue = string | true
@@ -263,6 +270,14 @@ export function resolveCustomJavascriptCodePageBucket(pathname: string | null | 
 
   if (normalizedPathname === '/portfolio' || normalizedPathname.startsWith('/portfolio/')) {
     return 'portfolio'
+  }
+
+  if (normalizedPathname === '/settings' || normalizedPathname.startsWith('/settings/')) {
+    return 'settings'
+  }
+
+  if (normalizedPathname === '/docs' || normalizedPathname.startsWith('/docs/')) {
+    return 'docs'
   }
 
   if (normalizedPathname === '/admin' || normalizedPathname.startsWith('/admin/')) {
