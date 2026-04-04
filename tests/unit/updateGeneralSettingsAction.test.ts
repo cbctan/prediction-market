@@ -137,7 +137,7 @@ describe('updateGeneralSettingsAction', () => {
     expect(savedPayload.find(entry => entry.key === 'site_linkedin_link')?.value).toBe('')
     expect(savedPayload.find(entry => entry.key === 'site_youtube_link')?.value).toBe('')
     expect(savedPayload.find(entry => entry.key === 'site_support_url')?.value).toBe('mailto:support@kuest.com')
-    expect(savedPayload.find(entry => entry.key === 'site_custom_javascript_codes')?.value).toBe('[]')
+    expect(savedPayload.find(entry => entry.key === 'site_custom_javascript_codes')?.value).toBe('')
     expect(savedPayload.find(entry => entry.key === 'fee_recipient_wallet')?.value).toBe('0x1111111111111111111111111111111111111111')
     expect(savedPayload.find(entry => entry.key === 'lifi_integrator')?.value).toBe('kuest-fork')
     expect(savedPayload.find(entry => entry.key === 'lifi_api_key')?.value).toBe('enc.v1.lifi-123')
