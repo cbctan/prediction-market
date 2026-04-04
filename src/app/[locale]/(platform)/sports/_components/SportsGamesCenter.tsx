@@ -4161,6 +4161,10 @@ export default function SportsGamesCenter({
           ? 'No upcoming games available.'
           : 'No games available for this week.'
 
+  const liveSectionEmptyStateLabel = normalizedSearchQuery
+    ? 'No live games found for this search.'
+    : 'No live games available.'
+
   useEffect(() => {
     if (openCardId && !filteredCards.some(card => card.id === openCardId)) {
       setOpenCardId(null)
@@ -5561,7 +5565,13 @@ export default function SportsGamesCenter({
                               ))}
                             </div>
                           )
-                        : null}
+                        : startingSoonGroupsByDate.length > 0
+                          ? (
+                              <div className="rounded-xl border bg-card p-6 text-sm text-muted-foreground">
+                                {liveSectionEmptyStateLabel}
+                              </div>
+                            )
+                          : null}
 
                       {startingSoonGroupsByDate.length > 0 && (
                         <div className="space-y-3">
