@@ -8,6 +8,7 @@ import { notFound } from 'next/navigation'
 import PwaInstallStateSync from '@/components/PwaInstallStateSync'
 import PwaServiceWorker from '@/components/PwaServiceWorker'
 import SiteStructuredData from '@/components/seo/SiteStructuredData'
+import SiteSupportWidgetScripts from '@/components/SiteSupportWidgetScripts'
 import TestModeBannerDeferred from '@/components/TestModeBannerDeferred'
 import { loadEnabledLocales } from '@/i18n/locale-settings'
 import { routing } from '@/i18n/routing'
@@ -98,6 +99,7 @@ export default async function LocaleLayout({ params, children }: LayoutProps<'/[
               {IS_TEST_MODE && <TestModeBannerDeferred />}
               <PwaInstallStateSync />
               {children}
+              <SiteSupportWidgetScripts locale={locale} scripts={runtimeTheme.site.supportWidgetScripts} />
             </AppProviders>
           </NextIntlClientProvider>
         </SiteIdentityProvider>

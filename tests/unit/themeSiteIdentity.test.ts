@@ -22,6 +22,7 @@ describe('theme site identity helpers', () => {
     expect(identity.googleAnalyticsId).toBeNull()
     expect(identity.discordLink).toBeNull()
     expect(identity.supportUrl).toBeNull()
+    expect(identity.supportWidgetScripts).toEqual([])
     expect(identity.pwaIcon192Url).toContain('/images/pwa/default-icon-192.png')
     expect(identity.pwaIcon512Url).toContain('/images/pwa/default-icon-512.png')
     expect(identity.appleTouchIconUrl).toContain('/images/pwa/default-icon-192.png')

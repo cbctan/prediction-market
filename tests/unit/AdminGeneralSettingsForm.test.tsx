@@ -58,6 +58,7 @@ describe('adminGeneralSettingsForm', () => {
           linkedinLink: '',
           youtubeLink: '',
           supportUrl: '',
+          supportWidgetScripts: [],
           feeRecipientWallet: '',
           lifiIntegrator: '',
           lifiApiKey: '',

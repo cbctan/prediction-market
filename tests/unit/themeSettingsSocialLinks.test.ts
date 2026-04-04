@@ -22,6 +22,7 @@ function createValidationInput() {
     linkedinLink: '',
     youtubeLink: '',
     supportUrl: '',
+    supportWidgetScriptsJson: '',
     feeRecipientWallet: '',
     lifiIntegrator: '',
     lifiApiKey: '',
@@ -39,6 +40,11 @@ describe('themeSettings social links', () => {
       linkedinLink: 'linkedin.com/company/kuest',
       youtubeLink: 'youtube.com/@kuest',
       supportUrl: 'support@kuest.com',
+      supportWidgetScriptsJson: JSON.stringify([{
+        name: 'Crisp',
+        snippet: '<script>window.$crisp = [];</script>',
+        disabledOn: ['admin'],
+      }]),
     })
 
     expect(result.error).toBeNull()
@@ -49,6 +55,11 @@ describe('themeSettings social links', () => {
     expect(result.data?.linkedinLinkValue).toBe('https://linkedin.com/company/kuest')
     expect(result.data?.youtubeLinkValue).toBe('https://youtube.com/@kuest')
     expect(result.data?.supportUrlValue).toBe('mailto:support@kuest.com')
+    expect(result.data?.supportWidgetScripts).toEqual([{
+      name: 'Crisp',
+      snippet: '<script>window.$crisp = [];</script>',
+      disabledOn: ['admin'],
+    }])
   })
 
   it('hydrates social links and support email from general settings', () => {
@@ -82,6 +93,14 @@ describe('themeSettings social links', () => {
           value: 'support@kuest.com',
           updated_at: '2026-03-08T00:00:00.000Z',
         },
+        site_support_widget_scripts: {
+          value: JSON.stringify([{
+            name: 'Crisp',
+            snippet: '<script>window.$crisp = [];</script>',
+            disabledOn: ['portfolio'],
+          }]),
+          updated_at: '2026-03-08T00:00:00.000Z',
+        },
       },
     })
 
@@ -92,5 +111,10 @@ describe('themeSettings social links', () => {
     expect(state.linkedinLink).toBe('https://linkedin.com/company/kuest')
     expect(state.youtubeLink).toBe('https://youtube.com/@kuest')
     expect(state.supportUrl).toBe('mailto:support@kuest.com')
+    expect(state.supportWidgetScripts).toEqual([{
+      name: 'Crisp',
+      snippet: '<script>window.$crisp = [];</script>',
+      disabledOn: ['portfolio'],
+    }])
   })
 })

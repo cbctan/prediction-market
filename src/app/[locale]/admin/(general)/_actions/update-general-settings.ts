@@ -117,6 +117,7 @@ export async function updateGeneralSettingsAction(
   const linkedinLinkRaw = formData.get('linkedin_link')
   const youtubeLinkRaw = formData.get('youtube_link')
   const supportUrlRaw = formData.get('support_url')
+  const supportWidgetScriptsJsonRaw = formData.get('support_widget_scripts_json')
   const feeRecipientWalletRaw = formData.get('fee_recipient_wallet')
   const lifiIntegratorRaw = formData.get('lifi_integrator')
   const lifiApiKeyRaw = formData.get('lifi_api_key')
@@ -139,6 +140,7 @@ export async function updateGeneralSettingsAction(
   const linkedinLink = typeof linkedinLinkRaw === 'string' ? linkedinLinkRaw : ''
   const youtubeLink = typeof youtubeLinkRaw === 'string' ? youtubeLinkRaw : ''
   const supportUrl = typeof supportUrlRaw === 'string' ? supportUrlRaw : ''
+  const supportWidgetScriptsJson = typeof supportWidgetScriptsJsonRaw === 'string' ? supportWidgetScriptsJsonRaw : ''
   const feeRecipientWallet = typeof feeRecipientWalletRaw === 'string' ? feeRecipientWalletRaw : ''
   const lifiIntegrator = typeof lifiIntegratorRaw === 'string' ? lifiIntegratorRaw : ''
   const lifiApiKey = typeof lifiApiKeyRaw === 'string' ? lifiApiKeyRaw : ''
@@ -203,6 +205,7 @@ export async function updateGeneralSettingsAction(
     linkedinLink,
     youtubeLink,
     supportUrl,
+    supportWidgetScriptsJson,
     feeRecipientWallet,
     lifiIntegrator,
     lifiApiKey,
@@ -251,6 +254,7 @@ export async function updateGeneralSettingsAction(
     { group: 'general', key: 'site_linkedin_link', value: validated.data.linkedinLinkValue },
     { group: 'general', key: 'site_youtube_link', value: validated.data.youtubeLinkValue },
     { group: 'general', key: 'site_support_url', value: validated.data.supportUrlValue },
+    { group: 'general', key: 'site_support_widget_scripts', value: validated.data.supportWidgetScriptsValue },
     { group: 'general', key: 'fee_recipient_wallet', value: validated.data.feeRecipientWalletValue },
     { group: 'general', key: 'lifi_integrator', value: validated.data.lifiIntegratorValue },
     { group: 'general', key: 'lifi_api_key', value: encryptedLiFiApiKey },
