@@ -1,7 +1,6 @@
 const SCRIPT_TAG_PATTERN = /<script\b([^>]*)>([\s\S]*?)<\/script>/gi
 const SCRIPT_ATTRIBUTE_PATTERN = /([^\s=/>]+)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'=<>`]+)))?/g
 const CUSTOM_JAVASCRIPT_CODE_TAG_PATTERN = /<script\b/i
-const CUSTOM_JAVASCRIPT_CODE_NON_SCRIPT_HTML_PATTERN = /^(?:<!--|<\/?(?!script\b)[A-Z][\w:-]*(?=[\s/>]))/i
 export const MAX_CUSTOM_JAVASCRIPT_CODES = 12
 export const MAX_CUSTOM_JAVASCRIPT_CODE_NAME_LENGTH = 80
 export const MAX_CUSTOM_JAVASCRIPT_CODE_SNIPPET_LENGTH = 20_000
@@ -64,6 +63,115 @@ function parseScriptAttributes(rawAttributes: string) {
   return attributes
 }
 
+function skipJavascriptString(snippet: string, start: number, quote: '"' | '\'' | '`') {
+  let index = start + 1
+
+  while (index < snippet.length) {
+    const character = snippet[index]
+
+    if (character === '\\') {
+      index += 2
+      continue
+    }
+
+    if (character === quote) {
+      return index + 1
+    }
+
+    index += 1
+  }
+
+  return index
+}
+
+function skipLineComment(snippet: string, start: number) {
+  let index = start + 2
+
+  while (index < snippet.length && snippet[index] !== '\n') {
+    index += 1
+  }
+
+  return index
+}
+
+function skipBlockComment(snippet: string, start: number) {
+  const endIndex = snippet.indexOf('*/', start + 2)
+
+  return endIndex === -1 ? snippet.length : endIndex + 2
+}
+
+function startsWithNonScriptHtml(snippet: string, start: number) {
+  if (snippet.startsWith('<!--', start)) {
+    return true
+  }
+
+  if (snippet[start] !== '<') {
+    return false
+  }
+
+  const previousCharacter = start > 0 ? snippet[start - 1] : ''
+  if (previousCharacter && /[\w$]/.test(previousCharacter)) {
+    return false
+  }
+
+  let index = start + 1
+  if (snippet[index] === '/') {
+    index += 1
+  }
+
+  const firstTagCharacter = snippet[index]
+  if (!firstTagCharacter || !/[A-Z]/i.test(firstTagCharacter)) {
+    return false
+  }
+
+  const lowerCasedSnippet = snippet.toLowerCase()
+  if (lowerCasedSnippet.startsWith('script', index)) {
+    const nextCharacter = snippet[index + 'script'.length]
+    if (!nextCharacter || /[\s/>]/.test(nextCharacter)) {
+      return false
+    }
+  }
+
+  index += 1
+  while (index < snippet.length && /[\w:-]/.test(snippet[index])) {
+    index += 1
+  }
+
+  return index < snippet.length && /[\s/>]/.test(snippet[index])
+}
+
+function containsNonScriptHtml(snippet: string) {
+  let index = 0
+
+  while (index < snippet.length) {
+    const character = snippet[index]
+    const nextCharacter = snippet[index + 1]
+
+    if (character === '"' || character === '\'' || character === '`') {
+      index = skipJavascriptString(snippet, index, character)
+      continue
+    }
+
+    if (character === '/' && nextCharacter === '/') {
+      index = skipLineComment(snippet, index)
+      continue
+    }
+
+    if (character === '/' && nextCharacter === '*') {
+      index = skipBlockComment(snippet, index)
+      continue
+    }
+
+    if (character === '<' && startsWithNonScriptHtml(snippet, index)) {
+      return true
+    }
+
+    index += 1
+  }
+
+  return false
+}
+
 function validateCustomJavascriptCodeSnippet(value: unknown, sourceLabel: string) {
   const normalized = typeof value === 'string' ? value.trim() : ''
   if (!normalized) {
@@ -77,7 +185,7 @@ function validateCustomJavascriptCodeSnippet(value: unknown, sourceLabel: string
     }
   }
 
-  if (CUSTOM_JAVASCRIPT_CODE_NON_SCRIPT_HTML_PATTERN.test(normalized) && !CUSTOM_JAVASCRIPT_CODE_TAG_PATTERN.test(normalized)) {
+  if (containsNonScriptHtml(normalized) && !CUSTOM_JAVASCRIPT_CODE_TAG_PATTERN.test(normalized)) {
     return {
       value: null as string | null,
       error: `${sourceLabel} must be raw JavaScript or a provider <script> snippet.`,

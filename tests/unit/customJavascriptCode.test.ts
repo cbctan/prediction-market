@@ -116,6 +116,22 @@ describe('custom javascript code helpers', () => {
     })
   })
 
+  it('rejects non-script html that appears later in the snippet', () => {
+    const result = validateCustomJavascriptCodesJson(JSON.stringify([
+      {
+        name: 'Broken later',
+        snippet: 'window.ready = true\n<div>bad</div>',
+        disabledOn: [],
+      },
+    ]), 'Custom javascript code')
+
+    expect(result).toEqual({
+      value: null,
+      valueJson: '',
+      error: 'Custom javascript code 1 snippet must be raw JavaScript or a provider <script> snippet.',
+    })
+  })
+
   it('maps pathname buckets and enables scripts only on allowed pages', () => {
     expect(resolveCustomJavascriptCodePageBucket('/')).toBe('home')
     expect(resolveCustomJavascriptCodePageBucket('/portfolio')).toBe('portfolio')
