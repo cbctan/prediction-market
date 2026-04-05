@@ -18,6 +18,30 @@ export type CustomJavascriptCodePageBucket = CustomJavascriptCodeDisablePage | '
 export type CustomJavascriptCodeAttributeValue = string | true
 
 const CUSTOM_JAVASCRIPT_CODE_DISABLE_PAGE_SET = new Set<string>(CUSTOM_JAVASCRIPT_CODE_DISABLE_PAGE_OPTIONS)
+const JAVASCRIPT_REGEX_PREFIX_KEYWORD_SET = new Set([
+  'await',
+  'case',
+  'delete',
+  'in',
+  'instanceof',
+  'new',
+  'of',
+  'return',
+  'throw',
+  'typeof',
+  'void',
+  'yield',
+])
+const JAVASCRIPT_CONTROL_FLOW_KEYWORD_SET = new Set([
+  'catch',
+  'do',
+  'else',
+  'for',
+  'if',
+  'switch',
+  'while',
+  'with',
+])
 
 export interface CustomJavascriptCodeConfig {
   name: string
@@ -84,6 +108,60 @@ function skipJavascriptString(snippet: string, start: number, quote: '"' | '\'' 
   return index
 }
 
+function isJavascriptIdentifierStart(character: string | undefined) {
+  return !!character && /[A-Z_$]/i.test(character)
+}
+
+function isJavascriptIdentifierPart(character: string | undefined) {
+  return !!character && /[\w$]/.test(character)
+}
+
+function skipJavascriptIdentifier(snippet: string, start: number) {
+  let index = start + 1
+
+  while (index < snippet.length && isJavascriptIdentifierPart(snippet[index])) {
+    index += 1
+  }
+
+  return index
+}
+
+function skipJavascriptNumber(snippet: string, start: number) {
+  let index = start
+
+  while (index < snippet.length && /[\d_]/.test(snippet[index])) {
+    index += 1
+  }
+
+  if (snippet[index] === '.' && /\d/.test(snippet[index + 1] ?? '')) {
+    index += 1
+
+    while (index < snippet.length && /[\d_]/.test(snippet[index])) {
+      index += 1
+    }
+  }
+
+  if ((snippet[index] === 'e' || snippet[index] === 'E') && /[+\-\d]/.test(snippet[index + 1] ?? '')) {
+    const exponentStart = index
+    index += 1
+
+    if (snippet[index] === '+' || snippet[index] === '-') {
+      index += 1
+    }
+
+    const exponentDigitsStart = index
+    while (index < snippet.length && /[\d_]/.test(snippet[index])) {
+      index += 1
+    }
+
+    if (exponentDigitsStart === index) {
+      index = exponentStart
+    }
+  }
+
+  return index
+}
+
 function skipLineComment(snippet: string, start: number) {
   let index = start + 2
 
@@ -98,6 +176,49 @@ function skipBlockComment(snippet: string, start: number) {
   const endIndex = snippet.indexOf('*/', start + 2)
 
   return endIndex === -1 ? snippet.length : endIndex + 2
+}
+
+function skipJavascriptRegexLiteral(snippet: string, start: number) {
+  let index = start + 1
+  let inCharacterClass = false
+
+  while (index < snippet.length) {
+    const character = snippet[index]
+
+    if (character === '\\') {
+      index += 2
+      continue
+    }
+
+    if (inCharacterClass) {
+      if (character === ']') {
+        inCharacterClass = false
+      }
+
+      index += 1
+      continue
+    }
+
+    if (character === '[') {
+      inCharacterClass = true
+      index += 1
+      continue
+    }
+
+    if (character === '/') {
+      index += 1
+
+      while (index < snippet.length && /[A-Z]/i.test(snippet[index])) {
+        index += 1
+      }
+
+      return index
+    }
+
+    index += 1
+  }
+
+  return snippet.length
 }
 
 function startsWithNonScriptHtml(snippet: string, start: number) {
@@ -142,13 +263,23 @@ function startsWithNonScriptHtml(snippet: string, start: number) {
 
 function containsNonScriptHtml(snippet: string) {
   let index = 0
+  let expectsExpression = true
+  let pendingControlParenthesis = false
+  const parenthesisContexts: boolean[] = []
 
   while (index < snippet.length) {
     const character = snippet[index]
     const nextCharacter = snippet[index + 1]
 
+    if (/\s/.test(character)) {
+      index += 1
+      continue
+    }
+
     if (character === '"' || character === '\'' || character === '`') {
       index = skipJavascriptString(snippet, index, character)
+      expectsExpression = false
+      pendingControlParenthesis = false
       continue
     }
 
@@ -162,10 +293,97 @@ function containsNonScriptHtml(snippet: string) {
       continue
     }
 
+    if (character === '/' && expectsExpression) {
+      index = skipJavascriptRegexLiteral(snippet, index)
+      expectsExpression = false
+      pendingControlParenthesis = false
+      continue
+    }
+
+    if (isJavascriptIdentifierStart(character)) {
+      const tokenEnd = skipJavascriptIdentifier(snippet, index)
+      const token = snippet.slice(index, tokenEnd)
+
+      index = tokenEnd
+      pendingControlParenthesis = JAVASCRIPT_CONTROL_FLOW_KEYWORD_SET.has(token)
+      expectsExpression = pendingControlParenthesis || JAVASCRIPT_REGEX_PREFIX_KEYWORD_SET.has(token)
+      continue
+    }
+
+    if (/\d/.test(character)) {
+      index = skipJavascriptNumber(snippet, index)
+      expectsExpression = false
+      pendingControlParenthesis = false
+      continue
+    }
+
     if (character === '<' && startsWithNonScriptHtml(snippet, index)) {
       return true
     }
 
+    if (character === '(') {
+      parenthesisContexts.push(pendingControlParenthesis)
+      expectsExpression = true
+      pendingControlParenthesis = false
+      index += 1
+      continue
+    }
+
+    if (character === ')') {
+      expectsExpression = parenthesisContexts.pop() ?? false
+      pendingControlParenthesis = false
+      index += 1
+      continue
+    }
+
+    if (character === '+' || character === '-') {
+      const isDoubleOperator = nextCharacter === character
+
+      expectsExpression = isDoubleOperator ? expectsExpression : true
+      pendingControlParenthesis = false
+      index += isDoubleOperator ? 2 : 1
+      continue
+    }
+
+    if (
+      character === '['
+      || character === '{'
+      || character === ','
+      || character === ';'
+      || character === ':'
+      || character === '?'
+      || character === '='
+      || character === '!'
+      || character === '&'
+      || character === '|'
+      || character === '^'
+      || character === '~'
+      || character === '*'
+      || character === '%'
+      || character === '<'
+      || character === '>'
+    ) {
+      expectsExpression = true
+      pendingControlParenthesis = false
+      index += 1
+      continue
+    }
+
+    if (character === '/' && nextCharacter === '=') {
+      expectsExpression = true
+      pendingControlParenthesis = false
+      index += 2
+      continue
+    }
+
+    if (character === '/' || character === '.' || character === ']' || character === '}') {
+      expectsExpression = false
+      pendingControlParenthesis = false
+      index += 1
+      continue
+    }
+
+    pendingControlParenthesis = false
     index += 1
   }
 

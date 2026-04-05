@@ -100,6 +100,25 @@ describe('custom javascript code helpers', () => {
     ])
   })
 
+  it('allows raw javascript snippets with regex literals that include html-like text', () => {
+    const result = validateCustomJavascriptCodesJson(JSON.stringify([
+      {
+        name: 'Pattern guard',
+        snippet: 'const htmlPattern = /<(div|span)>/i\nwindow.isHtmlTag = htmlPattern.test(tagName)',
+        disabledOn: [],
+      },
+    ]), 'Custom javascript code')
+
+    expect(result.error).toBeNull()
+    expect(result.value).toEqual([
+      {
+        name: 'Pattern guard',
+        snippet: 'const htmlPattern = /<(div|span)>/i\nwindow.isHtmlTag = htmlPattern.test(tagName)',
+        disabledOn: [],
+      },
+    ])
+  })
+
   it('rejects markup that is not raw JavaScript or a script snippet', () => {
     const result = validateCustomJavascriptCodesJson(JSON.stringify([
       {
