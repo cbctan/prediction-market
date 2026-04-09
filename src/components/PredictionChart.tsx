@@ -148,6 +148,20 @@ function toDomainTimestamp(value: Date | number | undefined) {
   return Number.NaN
 }
 
+function areSeriesKeyListsEqual(left: string[], right: string[]) {
+  if (left.length !== right.length) {
+    return false
+  }
+
+  for (let index = 0; index < left.length; index += 1) {
+    if (left[index] !== right[index]) {
+      return false
+    }
+  }
+
+  return true
+}
+
 export function PredictionChart({
   data: providedData,
   series: providedSeries,
@@ -802,7 +816,13 @@ export function PredictionChart({
       setCrossFadeData(null)
       surgePendingRef.current = false
       setSurgeActive(false)
-      setRevealSeriesKeys([])
+      setRevealSeriesKeys((previousKeys) => {
+        if (previousKeys.length === 0) {
+          return previousKeys
+        }
+
+        return []
+      })
       previousSeriesKeysRef.current = series.map(item => item.key)
       lastDataUpdateTypeRef.current = 'reset'
       previousDataRef.current = data
@@ -820,7 +840,13 @@ export function PredictionChart({
     const shouldPartialReveal = seriesChanged && addedSeries.length > 0 && hasPreviousSeries
     const nextRevealSeries = currentSeriesKeys
 
-    setRevealSeriesKeys(nextRevealSeries)
+    setRevealSeriesKeys((previousKeys) => {
+      if (areSeriesKeyListsEqual(previousKeys, nextRevealSeries)) {
+        return previousKeys
+      }
+
+      return nextRevealSeries
+    })
     previousSeriesKeysRef.current = currentSeriesKeys
     const shouldRunSurge = updateType === 'reset' && !disableResetAnimation
     surgePendingRef.current = shouldRunSurge
