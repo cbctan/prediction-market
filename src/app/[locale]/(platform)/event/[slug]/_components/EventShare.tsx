@@ -1,4 +1,3 @@
-import type { RefObject } from 'react'
 import type { Event } from '@/types'
 import { CheckIcon, ShareIcon } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
@@ -46,25 +45,52 @@ function parseAffiliateToastData(result: Awaited<ReturnType<typeof fetchAffiliat
   }
 }
 
-export default function EventShare({ event }: EventShareProps) {
-  const site = useSiteIdentity()
-  const [shareSuccess, setShareSuccess] = useState(false)
+const MENU_CLOSE_DELAY_MS = 120
+const COPY_FEEDBACK_DURATION_MS = 1600
+
+function useCopyFeedback() {
   const [copiedKey, setCopiedKey] = useState<string | null>(null)
-  const [affiliateSharePercent, setAffiliateSharePercent] = useState<number | null>(null)
-  const [tradeFeePercent, setTradeFeePercent] = useState<number | null>(null)
-  const [hasResolvedAffiliateToastData, setHasResolvedAffiliateToastData] = useState(false)
-  const [shareMenuOpen, setShareMenuOpen] = useState(false)
   const copyTimeoutRef = useRef<number | null>(null)
+
+  useEffect(function clearCopyTimeoutOnUnmount() {
+    return function clearCopyTimeout() {
+      if (copyTimeoutRef.current) {
+        window.clearTimeout(copyTimeoutRef.current)
+      }
+    }
+  }, [])
+
+  function markKeyAsCopied(key: string) {
+    setCopiedKey(key)
+    if (copyTimeoutRef.current) {
+      window.clearTimeout(copyTimeoutRef.current)
+    }
+    copyTimeoutRef.current = window.setTimeout(setCopiedKey, COPY_FEEDBACK_DURATION_MS, null)
+  }
+
+  return { copiedKey, markKeyAsCopied }
+}
+
+function useShareMenuHover() {
+  const [shareMenuOpen, setShareMenuOpen] = useState(false)
   const wrapperRef = useRef<HTMLDivElement | null>(null)
   const closeTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const affiliateToastDataRequestRef = useRef<Promise<AffiliateToastData> | null>(null)
-  const user = useUser()
-  const affiliateCode = user?.affiliate_code?.trim() ?? ''
-  const isMultiMarket = event.total_markets_count > 1
-  const eventPath = resolveEventPagePath(event)
 
-  function relatedTargetIsWithin(ref: RefObject<HTMLElement | null>, relatedTarget: EventTarget | null) {
-    const current = ref.current
+  function clearCloseTimeout() {
+    if (closeTimeoutRef.current) {
+      clearTimeout(closeTimeoutRef.current)
+      closeTimeoutRef.current = null
+    }
+  }
+
+  useEffect(function clearCloseTimeoutOnUnmount() {
+    return function clearMenuCloseTimeout() {
+      clearCloseTimeout()
+    }
+  }, [])
+
+  function relatedTargetIsInsideWrapper(relatedTarget: EventTarget | null) {
+    const current = wrapperRef.current
     if (!current) {
       return false
     }
@@ -77,40 +103,34 @@ export default function EventShare({ event }: EventShareProps) {
     return current.contains(relatedTarget)
   }
 
-  function clearCloseTimeout() {
-    if (closeTimeoutRef.current) {
-      clearTimeout(closeTimeoutRef.current)
-      closeTimeoutRef.current = null
-    }
-  }
-
-  function handleWrapperPointerEnter() {
-    clearCloseTimeout()
-    setShareMenuOpen(true)
-    prefetchAffiliateToastData()
-  }
-
-  function handleWrapperPointerLeave(event: React.PointerEvent) {
-    if (relatedTargetIsWithin(wrapperRef, event.relatedTarget)) {
-      return
-    }
-
-    clearCloseTimeout()
-    closeTimeoutRef.current = setTimeout(() => {
-      setShareMenuOpen(false)
-    }, 120)
-  }
-
-  useEffect(() => {
-    return () => {
-      if (copyTimeoutRef.current) {
-        window.clearTimeout(copyTimeoutRef.current)
-      }
+  return {
+    shareMenuOpen,
+    setShareMenuOpen,
+    wrapperRef,
+    clearCloseTimeout,
+    scheduleClose() {
       clearCloseTimeout()
-    }
-  }, [])
+      closeTimeoutRef.current = setTimeout(function closeMenuAfterDelay() {
+        setShareMenuOpen(false)
+      }, MENU_CLOSE_DELAY_MS)
+    },
+    relatedTargetIsInsideWrapper,
+  }
+}
 
-  useEffect(() => {
+function useAffiliateToastData({
+  affiliateCode,
+  siteName,
+}: {
+  affiliateCode: string
+  siteName: string
+}) {
+  const [affiliateSharePercent, setAffiliateSharePercent] = useState<number | null>(null)
+  const [tradeFeePercent, setTradeFeePercent] = useState<number | null>(null)
+  const [hasResolvedAffiliateToastData, setHasResolvedAffiliateToastData] = useState(false)
+  const affiliateToastDataRequestRef = useRef<Promise<AffiliateToastData> | null>(null)
+
+  useEffect(function resetAffiliateDataOnCodeChange() {
     setAffiliateSharePercent(null)
     setTradeFeePercent(null)
     setHasResolvedAffiliateToastData(false)
@@ -176,12 +196,16 @@ export default function EventShare({ event }: EventShareProps) {
       affiliateCode,
       affiliateSharePercent: toastData.affiliateSharePercent,
       tradeFeePercent: toastData.tradeFeePercent,
-      siteName: site.name,
+      siteName,
       context: 'link',
     })
-  }, [affiliateCode, ensureAffiliateToastData, site.name])
+  }, [affiliateCode, ensureAffiliateToastData, siteName])
 
-  const debugPayload = useMemo(() => {
+  return { prefetchAffiliateToastData, showAffiliateToast }
+}
+
+function useDebugCopy(event: Event) {
+  const debugPayload = useMemo(function buildDebugPayload() {
     return {
       event: {
         id: event.id,
@@ -204,7 +228,7 @@ export default function EventShare({ event }: EventShareProps) {
     }
   }, [event.id, event.markets, event.slug, event.title])
 
-  const handleDebugCopy = useCallback(async () => {
+  const handleDebugCopy = useCallback(async function handleDebugCopy() {
     try {
       await navigator.clipboard.writeText(JSON.stringify(debugPayload, null, 2))
     }
@@ -213,24 +237,69 @@ export default function EventShare({ event }: EventShareProps) {
     }
   }, [debugPayload])
 
-  const maybeHandleDebugCopy = useCallback((event: React.MouseEvent | React.PointerEvent) => {
-    if (!event.altKey) {
+  const maybeHandleDebugCopy = useCallback((
+    triggerEvent: React.MouseEvent | React.PointerEvent,
+  ) => {
+    if (!triggerEvent.altKey) {
       return false
     }
 
-    event.preventDefault()
-    event.stopPropagation()
+    triggerEvent.preventDefault()
+    triggerEvent.stopPropagation()
     void handleDebugCopy()
     return true
   }, [handleDebugCopy])
 
-  const buildShareUrl = useCallback((path: string) => {
+  return { maybeHandleDebugCopy }
+}
+
+function useShareUrlBuilder(affiliateCode: string) {
+  return useCallback((path: string) => {
     const url = new URL(path, window.location.origin)
     if (affiliateCode) {
       url.searchParams.set('r', affiliateCode)
     }
     return url.toString()
   }, [affiliateCode])
+}
+
+export default function EventShare({ event }: EventShareProps) {
+  const site = useSiteIdentity()
+  const user = useUser()
+  const affiliateCode = user?.affiliate_code?.trim() ?? ''
+  const isMultiMarket = event.total_markets_count > 1
+  const eventPath = resolveEventPagePath(event)
+
+  const [shareSuccess, setShareSuccess] = useState(false)
+  const { copiedKey, markKeyAsCopied } = useCopyFeedback()
+  const {
+    shareMenuOpen,
+    setShareMenuOpen,
+    wrapperRef,
+    clearCloseTimeout,
+    scheduleClose,
+    relatedTargetIsInsideWrapper,
+  } = useShareMenuHover()
+  const { prefetchAffiliateToastData, showAffiliateToast } = useAffiliateToastData({
+    affiliateCode,
+    siteName: site.name,
+  })
+  const { maybeHandleDebugCopy } = useDebugCopy(event)
+  const buildShareUrl = useShareUrlBuilder(affiliateCode)
+
+  function handleWrapperPointerEnter() {
+    clearCloseTimeout()
+    setShareMenuOpen(true)
+    prefetchAffiliateToastData()
+  }
+
+  function handleWrapperPointerLeave(pointerEvent: React.PointerEvent) {
+    if (relatedTargetIsInsideWrapper(pointerEvent.relatedTarget)) {
+      return
+    }
+
+    scheduleClose()
+  }
 
   async function handleShare() {
     try {
@@ -249,11 +318,7 @@ export default function EventShare({ event }: EventShareProps) {
     try {
       const url = buildShareUrl(path)
       await navigator.clipboard.writeText(url)
-      setCopiedKey(key)
-      if (copyTimeoutRef.current) {
-        window.clearTimeout(copyTimeoutRef.current)
-      }
-      copyTimeoutRef.current = window.setTimeout(setCopiedKey, 1600, null)
+      markKeyAsCopied(key)
       await showAffiliateToast()
     }
     catch (error) {

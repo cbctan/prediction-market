@@ -214,22 +214,213 @@ function useWindowViewport() {
   )
 }
 
-function EventOrderQuerySync({ event, marketSlug, isMobile }: EventOrderQuerySyncProps) {
-  const searchParams = useSearchParams()
-  const setMarket = useOrder(state => state.setMarket)
-  const setOutcome = useOrder(state => state.setOutcome)
-  const setSide = useOrder(state => state.setSide)
-  const setType = useOrder(state => state.setType)
-  const setAmount = useOrder(state => state.setAmount)
-  const setLimitShares = useOrder(state => state.setLimitShares)
-  const setIsMobileOrderPanelOpen = useOrder(state => state.setIsMobileOrderPanelOpen)
-  const appliedOrderParamsRef = useRef<string | null>(null)
-  const resolvedQueryState = useMemo(
-    () => resolveEventOrderQueryState(event, marketSlug, searchParams),
-    [event, marketSlug, searchParams],
-  )
+function useHasResolvedMobileBreakpoint() {
+  const [hasResolvedMobileBreakpoint, setHasResolvedMobileBreakpoint] = useState(false)
 
-  useEffect(() => {
+  useEffect(function resolveMobileBreakpointOnMount() {
+    let isActive = true
+
+    queueMicrotask(function markBreakpointResolved() {
+      if (isActive) {
+        setHasResolvedMobileBreakpoint(true)
+      }
+    })
+
+    return function cancelBreakpointResolution() {
+      isActive = false
+    }
+  }, [])
+
+  return hasResolvedMobileBreakpoint
+}
+
+function useSyncUserToClientStore(user: User | null) {
+  const prevUserIdRef = useRef<string | null>(null)
+
+  useEffect(function syncServerUserToClientStore() {
+    if (user?.id) {
+      prevUserIdRef.current = user.id
+      useUser.setState(user)
+      return
+    }
+
+    if (!user && prevUserIdRef.current) {
+      prevUserIdRef.current = null
+      useUser.setState(null)
+    }
+  }, [user])
+}
+
+function useSetEventInOrderStore(event: Event) {
+  const setEvent = useOrder(state => state.setEvent)
+
+  useEffect(function writeEventToOrderStore() {
+    setEvent(event)
+  }, [event, setEvent])
+}
+
+function useOrderBootstrapMarketSelection({
+  event,
+  marketSlug,
+  orderBootstrapTargetMarket,
+  currentEventId,
+  currentMarketId,
+  setMarket,
+  setOutcome,
+}: {
+  event: Event
+  marketSlug: string | undefined
+  orderBootstrapTargetMarket: Event['markets'][number] | null
+  currentEventId: string | undefined
+  currentMarketId: string | undefined
+  setMarket: (market: Event['markets'][number]) => void
+  setOutcome: (outcome: Event['markets'][number]['outcomes'][number]) => void
+}) {
+  const appliedMarketSlugRef = useRef<string | null>(null)
+  const appliedEventIdRef = useRef<string | null>(null)
+
+  useEffect(function bootstrapOrderMarketSelection() {
+    if (!orderBootstrapTargetMarket) {
+      return
+    }
+
+    const shouldApplyMarket = marketSlug
+      ? appliedMarketSlugRef.current !== marketSlug
+      || appliedEventIdRef.current !== event.id
+      || !currentMarketId
+      : currentEventId !== event.id
+        || !currentMarketId
+
+    if (!shouldApplyMarket) {
+      return
+    }
+
+    const currentOrderState = useOrder.getState()
+    const nextSelection = resolveEventOrderBootstrapSelection({
+      event,
+      targetMarket: orderBootstrapTargetMarket,
+      preserveSnapshotMarket: !marketSlug,
+      snapshot: {
+        eventId: currentOrderState.event?.id,
+        market: currentOrderState.market,
+        outcome: currentOrderState.outcome,
+      },
+    })
+
+    setMarket(nextSelection.market)
+    if (nextSelection.outcome) {
+      setOutcome(nextSelection.outcome)
+    }
+    appliedMarketSlugRef.current = marketSlug ?? null
+    appliedEventIdRef.current = event.id
+  }, [currentEventId, currentMarketId, event, marketSlug, orderBootstrapTargetMarket, setMarket, setOutcome])
+}
+
+function useInitialMarketAndOutcome({
+  event,
+  marketSlug,
+}: {
+  event: Event
+  marketSlug: string | undefined
+}) {
+  const initialMarket = useMemo(() => {
+    if (marketSlug) {
+      return event.markets.find(market => market.slug === marketSlug) ?? resolveDefaultMarket(event.markets) ?? null
+    }
+    return resolveDefaultMarket(event.markets) ?? null
+  }, [event.markets, marketSlug])
+
+  const initialOutcome = useMemo(() => {
+    if (!initialMarket) {
+      return null
+    }
+    return initialMarket.outcomes[0] ?? null
+  }, [initialMarket])
+
+  return { initialMarket, initialOutcome }
+}
+
+function useSelectedMarketInfo({
+  event,
+  currentMarketId,
+  initialMarket,
+}: {
+  event: Event
+  currentMarketId: string | undefined
+  initialMarket: Event['markets'][number] | null
+}) {
+  const selectedMarket = useMemo(() => {
+    if (!currentMarketId) {
+      return initialMarket
+    }
+    return event.markets.find(market => market.condition_id === currentMarketId) ?? initialMarket
+  }, [currentMarketId, event.markets, initialMarket])
+
+  const selectedMarketTimelineOutcome = useMemo(() => {
+    return selectedMarket && isMarketResolved(selectedMarket)
+      ? toResolutionTimelineOutcome(resolveEventResolvedOutcomeIndex(event, selectedMarket))
+      : null
+  }, [event, selectedMarket])
+
+  return { selectedMarket, selectedMarketTimelineOutcome }
+}
+
+function useBackToTopBounds({
+  isMobile,
+  scrollY,
+  viewportWidth,
+  contentRef,
+  eventMarketsRef,
+}: {
+  isMobile: boolean
+  scrollY: number
+  viewportWidth: number
+  contentRef: React.RefObject<HTMLDivElement | null>
+  eventMarketsRef: React.RefObject<HTMLDivElement | null>
+}) {
+  return useMemo(() => {
+    if (isMobile || !contentRef.current || !eventMarketsRef.current) {
+      return null
+    }
+
+    const eventMarketsTop = eventMarketsRef.current.getBoundingClientRect().top + scrollY
+    if (scrollY < eventMarketsTop - 80) {
+      return null
+    }
+
+    const rect = contentRef.current.getBoundingClientRect()
+    const boundedWidth = viewportWidth > 0 ? Math.min(rect.width, viewportWidth) : rect.width
+    return {
+      left: rect.left,
+      width: boundedWidth,
+    }
+  }, [contentRef, eventMarketsRef, isMobile, scrollY, viewportWidth])
+}
+
+function useAppliedOrderQuerySync({
+  resolvedQueryState,
+  isMobile,
+  setMarket,
+  setOutcome,
+  setSide,
+  setType,
+  setAmount,
+  setLimitShares,
+  setIsMobileOrderPanelOpen,
+}: {
+  resolvedQueryState: ResolvedEventOrderQueryState | null
+  isMobile: boolean
+  setMarket: (market: Event['markets'][number]) => void
+  setOutcome: (outcome: Event['markets'][number]['outcomes'][number]) => void
+  setSide: (side: typeof ORDER_SIDE.BUY | typeof ORDER_SIDE.SELL) => void
+  setType: (type: typeof ORDER_TYPE.MARKET | typeof ORDER_TYPE.LIMIT) => void
+  setAmount: (value: string) => void
+  setLimitShares: (value: string) => void
+  setIsMobileOrderPanelOpen: (value: boolean) => void
+}) {
+  const appliedOrderParamsRef = useRef<string | null>(null)
+
+  useEffect(function applyOrderQueryParamsToStore() {
     if (!resolvedQueryState) {
       return
     }
@@ -281,6 +472,33 @@ function EventOrderQuerySync({ event, marketSlug, isMobile }: EventOrderQuerySyn
     setSide,
     setType,
   ])
+}
+
+function EventOrderQuerySync({ event, marketSlug, isMobile }: EventOrderQuerySyncProps) {
+  const searchParams = useSearchParams()
+  const setMarket = useOrder(state => state.setMarket)
+  const setOutcome = useOrder(state => state.setOutcome)
+  const setSide = useOrder(state => state.setSide)
+  const setType = useOrder(state => state.setType)
+  const setAmount = useOrder(state => state.setAmount)
+  const setLimitShares = useOrder(state => state.setLimitShares)
+  const setIsMobileOrderPanelOpen = useOrder(state => state.setIsMobileOrderPanelOpen)
+  const resolvedQueryState = useMemo(
+    () => resolveEventOrderQueryState(event, marketSlug, searchParams),
+    [event, marketSlug, searchParams],
+  )
+
+  useAppliedOrderQuerySync({
+    resolvedQueryState,
+    isMobile,
+    setMarket,
+    setOutcome,
+    setSide,
+    setType,
+    setAmount,
+    setLimitShares,
+    setIsMobileOrderPanelOpen,
+  })
 
   return null
 }
@@ -295,18 +513,14 @@ export default function EventContent({
   liveChartConfig = null,
 }: EventContentProps) {
   const t = useExtracted()
-  const setEvent = useOrder(state => state.setEvent)
   const setMarket = useOrder(state => state.setMarket)
   const setOutcome = useOrder(state => state.setOutcome)
   const currentEventId = useOrder(state => state.event?.id)
   const currentMarketId = useOrder(state => state.market?.condition_id)
   const isMobile = useIsMobile()
   const clientUser = useUser()
-  const prevUserIdRef = useRef<string | null>(null)
   const contentRef = useRef<HTMLDivElement | null>(null)
   const eventMarketsRef = useRef<HTMLDivElement | null>(null)
-  const appliedMarketSlugRef = useRef<string | null>(null)
-  const appliedEventIdRef = useRef<string | null>(null)
   const windowViewport = useWindowViewport()
   const scrollY = windowViewport.scrollY
   const viewportWidth = windowViewport.viewportWidth
@@ -317,120 +531,37 @@ export default function EventContent({
     () => resolveBootstrapTargetMarket(event, marketSlug),
     [event, marketSlug],
   )
-  const initialMarket = useMemo(() => {
-    if (marketSlug) {
-      return event.markets.find(market => market.slug === marketSlug) ?? resolveDefaultMarket(event.markets) ?? null
-    }
-    return resolveDefaultMarket(event.markets) ?? null
-  }, [event.markets, marketSlug])
-  const initialOutcome = useMemo(() => {
-    if (!initialMarket) {
-      return null
-    }
-    return initialMarket.outcomes[0] ?? null
-  }, [initialMarket])
-  const [hasResolvedMobileBreakpoint, setHasResolvedMobileBreakpoint] = useState(false)
-  const selectedMarket = useMemo(() => {
-    if (!currentMarketId) {
-      return initialMarket
-    }
-    return event.markets.find(market => market.condition_id === currentMarketId) ?? initialMarket
-  }, [currentMarketId, event.markets, initialMarket])
-  const selectedMarketTimelineOutcome = useMemo(
-    () => selectedMarket && isMarketResolved(selectedMarket)
-      ? toResolutionTimelineOutcome(resolveEventResolvedOutcomeIndex(event, selectedMarket))
-      : null,
-    [event, selectedMarket],
-  )
+  const { initialMarket, initialOutcome } = useInitialMarketAndOutcome({ event, marketSlug })
+  const hasResolvedMobileBreakpoint = useHasResolvedMobileBreakpoint()
+  const { selectedMarket, selectedMarketTimelineOutcome } = useSelectedMarketInfo({
+    event,
+    currentMarketId,
+    initialMarket,
+  })
   const singleMarket = event.markets[0]
   const isSingleMarketResolved = isMarketResolved(singleMarket)
   const usesLiveSeriesChart = Boolean(liveChartConfig && shouldUseLiveSeriesChart(event, liveChartConfig))
   const shouldRenderMobileRelated = hasResolvedMobileBreakpoint && isMobile
   const shouldRenderDesktopRelated = hasResolvedMobileBreakpoint && !isMobile
-  const backToTopBounds = useMemo(() => {
-    if (isMobile || !contentRef.current || !eventMarketsRef.current) {
-      return null
-    }
+  const backToTopBounds = useBackToTopBounds({
+    isMobile,
+    scrollY,
+    viewportWidth,
+    contentRef,
+    eventMarketsRef,
+  })
 
-    const eventMarketsTop = eventMarketsRef.current.getBoundingClientRect().top + scrollY
-    if (scrollY < eventMarketsTop - 80) {
-      return null
-    }
-
-    const rect = contentRef.current.getBoundingClientRect()
-    const boundedWidth = viewportWidth > 0 ? Math.min(rect.width, viewportWidth) : rect.width
-    return {
-      left: rect.left,
-      width: boundedWidth,
-    }
-  }, [isMobile, scrollY, viewportWidth])
-
-  useEffect(() => {
-    let isActive = true
-
-    queueMicrotask(() => {
-      if (isActive) {
-        setHasResolvedMobileBreakpoint(true)
-      }
-    })
-
-    return () => {
-      isActive = false
-    }
-  }, [])
-
-  useEffect(() => {
-    if (user?.id) {
-      prevUserIdRef.current = user.id
-      useUser.setState(user)
-      return
-    }
-
-    if (!user && prevUserIdRef.current) {
-      prevUserIdRef.current = null
-      useUser.setState(null)
-    }
-  }, [user])
-
-  useEffect(() => {
-    setEvent(event)
-  }, [event, setEvent])
-
-  useEffect(() => {
-    if (!orderBootstrapTargetMarket) {
-      return
-    }
-
-    const shouldApplyMarket = marketSlug
-      ? appliedMarketSlugRef.current !== marketSlug
-      || appliedEventIdRef.current !== event.id
-      || !currentMarketId
-      : currentEventId !== event.id
-        || !currentMarketId
-
-    if (!shouldApplyMarket) {
-      return
-    }
-
-    const currentOrderState = useOrder.getState()
-    const nextSelection = resolveEventOrderBootstrapSelection({
-      event,
-      targetMarket: orderBootstrapTargetMarket,
-      preserveSnapshotMarket: !marketSlug,
-      snapshot: {
-        eventId: currentOrderState.event?.id,
-        market: currentOrderState.market,
-        outcome: currentOrderState.outcome,
-      },
-    })
-
-    setMarket(nextSelection.market)
-    if (nextSelection.outcome) {
-      setOutcome(nextSelection.outcome)
-    }
-    appliedMarketSlugRef.current = marketSlug ?? null
-    appliedEventIdRef.current = event.id
-  }, [currentEventId, currentMarketId, event, marketSlug, orderBootstrapTargetMarket, setMarket, setOutcome])
+  useSyncUserToClientStore(user)
+  useSetEventInOrderStore(event)
+  useOrderBootstrapMarketSelection({
+    event,
+    marketSlug,
+    orderBootstrapTargetMarket,
+    currentEventId,
+    currentMarketId,
+    setMarket,
+    setOutcome,
+  })
 
   function handleBackToTop() {
     window.scrollTo({ top: 0, behavior: 'smooth' })
