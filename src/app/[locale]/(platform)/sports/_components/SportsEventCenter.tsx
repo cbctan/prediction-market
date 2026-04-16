@@ -143,6 +143,14 @@ function getStoredOddsFormatServerSnapshot(): OddsFormat {
   return 'price'
 }
 
+function useOddsFormat() {
+  return useSyncExternalStore(
+    subscribeToOddsFormatStorage,
+    getStoredOddsFormatClientSnapshot,
+    getStoredOddsFormatServerSnapshot,
+  )
+}
+
 function areRecordValuesEqual<T extends string | null | undefined>(
   left: Record<string, T>,
   right: Record<string, T>,
@@ -309,15 +317,13 @@ function resolveEsportsSegmentPanelSortOrder(markets: SportsGamesCard['detailMar
   return 99
 }
 
-function SportsSegmentNumberPicker({
+function useSportsSegmentNumberPicker({
   options,
   activeNumber,
-  segmentLabel,
   onPick,
 }: {
   options: SportsSegmentNumberPickerOption[]
   activeNumber: number | null
-  segmentLabel: string
   onPick: (number: number) => void
 }) {
   const scrollerRef = useRef<HTMLDivElement | null>(null)
@@ -410,7 +416,7 @@ function SportsSegmentNumberPicker({
     setEndSpacer(endSpacerWidth)
   }, [options])
 
-  useEffect(() => {
+  useEffect(function alignOnActiveOptionChange() {
     if (activeOptionIndex < 0) {
       return
     }
@@ -418,7 +424,7 @@ function SportsSegmentNumberPicker({
     alignActiveOption('auto')
   }, [activeOptionIndex, alignActiveOption, endSpacer, startSpacer])
 
-  useEffect(() => {
+  useEffect(function scheduleSpacerAndAlignmentUpdate() {
     if (options.length <= 1) {
       return
     }
@@ -428,12 +434,12 @@ function SportsSegmentNumberPicker({
       alignActiveOption('auto')
     })
 
-    return () => {
+    return function cancelScheduledSpacerAndAlignmentUpdate() {
       window.cancelAnimationFrame(frame)
     }
   }, [alignActiveOption, options.length, updateSpacers])
 
-  useEffect(() => {
+  useEffect(function observeScrollerResizeForSpacerUpdate() {
     const scrollerElement = scrollerRef.current
     if (options.length <= 1 || !scrollerElement) {
       return
@@ -443,17 +449,51 @@ function SportsSegmentNumberPicker({
 
     if (typeof ResizeObserver === 'undefined') {
       window.addEventListener('resize', updateSpacers)
-      return () => {
+      return function removeResizeListener() {
         window.removeEventListener('resize', updateSpacers)
       }
     }
 
     const observer = new ResizeObserver(updateSpacers)
     observer.observe(scrollerElement)
-    return () => {
+    return function disconnectResizeObserver() {
       observer.disconnect()
     }
   }, [options.length, updateSpacers])
+
+  return {
+    scrollerRef,
+    buttonRefsRef,
+    startSpacer,
+    endSpacer,
+    activeOptionIndex,
+    pickOption,
+    handlePickPrevious,
+    handlePickNext,
+  }
+}
+
+function SportsSegmentNumberPicker({
+  options,
+  activeNumber,
+  segmentLabel,
+  onPick,
+}: {
+  options: SportsSegmentNumberPickerOption[]
+  activeNumber: number | null
+  segmentLabel: string
+  onPick: (number: number) => void
+}) {
+  const {
+    scrollerRef,
+    buttonRefsRef,
+    startSpacer,
+    endSpacer,
+    activeOptionIndex,
+    pickOption,
+    handlePickPrevious,
+    handlePickNext,
+  } = useSportsSegmentNumberPicker({ options, activeNumber, onPick })
 
   if (options.length <= 1) {
     return null
@@ -546,21 +586,25 @@ function SportsSegmentNumberPicker({
   )
 }
 
-function SportsEventQuerySync({
-  onSelectionChange,
-}: {
-  onSelectionChange: (selection: SportsEventQuerySelection) => void
-}) {
+function useSportsEventQuerySync(onSelectionChange: (selection: SportsEventQuerySelection) => void) {
   const searchParams = useSearchParams()
 
-  useEffect(() => {
+  useEffect(function syncQuerySelectionFromSearchParams() {
     onSelectionChange({
       conditionId: searchParams.get('conditionId')?.trim() ?? null,
       outcomeIndex: parseRequestedOutcomeIndex(searchParams.get('outcomeIndex')),
     })
 
-    return () => {}
+    return function noopQuerySelectionSyncCleanup() {}
   }, [onSelectionChange, searchParams])
+}
+
+function SportsEventQuerySync({
+  onSelectionChange,
+}: {
+  onSelectionChange: (selection: SportsEventQuerySelection) => void
+}) {
+  useSportsEventQuerySync(onSelectionChange)
 
   return null
 }
@@ -1058,9 +1102,7 @@ function resolveRedeemTagAccent(
   }
 }
 
-function SportsEventShareButton({ event }: { event: SportsGamesCard['event'] }) {
-  const user = useUser()
-  const affiliateCode = user?.affiliate_code?.trim() ?? ''
+function useSportsEventShareButton(event: SportsGamesCard['event']) {
   const [shareSuccess, setShareSuccess] = useState(false)
   const debugPayload = useMemo(() => {
     return {
@@ -1104,6 +1146,14 @@ function SportsEventShareButton({ event }: { event: SportsGamesCard['event'] }) 
     void handleDebugCopy()
     return true
   }, [handleDebugCopy])
+
+  return { shareSuccess, setShareSuccess, maybeHandleDebugCopy }
+}
+
+function SportsEventShareButton({ event }: { event: SportsGamesCard['event'] }) {
+  const user = useUser()
+  const affiliateCode = user?.affiliate_code?.trim() ?? ''
+  const { shareSuccess, setShareSuccess, maybeHandleDebugCopy } = useSportsEventShareButton(event)
 
   async function handleShare() {
     try {
@@ -1502,41 +1552,36 @@ function SportsEventRelatedGames({
   )
 }
 
-export default function SportsEventCenter({
-  card,
-  marketViewCards = [],
-  relatedCards = [],
-  marketContextEnabled = false,
-  sportSlug,
-  sportLabel,
-  initialMarketSlug = null,
-  initialMarketViewKey = null,
-  vertical = 'sports',
-}: SportsEventCenterProps) {
-  const verticalConfig = getSportsVerticalConfig(vertical)
-  const locale = useLocale()
-  const site = useSiteIdentity()
-  const isMobile = useIsMobile()
-  const setOrderEvent = useOrder(state => state.setEvent)
-  const setOrderMarket = useOrder(state => state.setMarket)
-  const setOrderOutcome = useOrder(state => state.setOutcome)
-  const setOrderSide = useOrder(state => state.setSide)
-  const setIsMobileOrderPanelOpen = useOrder(state => state.setIsMobileOrderPanelOpen)
-  const openLivestream = useSportsLivestream(state => state.openStream)
-  const activeStreamUrl = useSportsLivestream(state => state.streamUrl)
-  const orderEventId = useOrder(state => state.event?.id ?? null)
-  const orderMarketConditionId = useOrder(state => state.market?.condition_id ?? null)
-  const orderOutcomeIndex = useOrder(state => state.outcome?.outcome_index ?? null)
-  const user = useUser()
+function useQuerySelection() {
   const [querySelection, setQuerySelection] = useState<SportsEventQuerySelection>(EMPTY_QUERY_SELECTION)
-  const oddsFormat = useSyncExternalStore(
-    subscribeToOddsFormatStorage,
-    getStoredOddsFormatClientSnapshot,
-    getStoredOddsFormatServerSnapshot,
-  )
-  const [claimedConditionIds, setClaimedConditionIds] = useState<Record<string, true>>({})
-  const [redeemSectionKey, setRedeemSectionKey] = useState<EventSectionKey | null>(null)
-  const [redeemDefaultConditionId, setRedeemDefaultConditionId] = useState<string | null>(null)
+
+  const handleQuerySelectionChange = useCallback((nextSelection: SportsEventQuerySelection) => {
+    setQuerySelection((current) => {
+      if (
+        current.conditionId === nextSelection.conditionId
+        && current.outcomeIndex === nextSelection.outcomeIndex
+      ) {
+        return current
+      }
+
+      return nextSelection
+    })
+  }, [])
+
+  return { querySelection, handleQuerySelectionChange }
+}
+
+function useActiveMarketView({
+  card,
+  marketViewCards,
+  initialMarketSlug,
+  initialMarketViewKey,
+}: {
+  card: SportsGamesCard
+  marketViewCards: SportsGamesCardMarketView[]
+  initialMarketSlug: string | null
+  initialMarketViewKey: SportsEventMarketViewKey | null
+}) {
   const normalizedMarketViewCards = useMemo(
     () => marketViewCards.length > 0
       ? marketViewCards
@@ -1568,27 +1613,10 @@ export default function SportsEventCenter({
   }, [initialMarketViewFromSlug, initialMarketViewKey, normalizedMarketViewCards])
   const [activeMarketViewKey, setActiveMarketViewKey] = useState<SportsEventMarketViewKey>(resolvedInitialMarketViewKey)
 
-  const handleQuerySelectionChange = useCallback((nextSelection: SportsEventQuerySelection) => {
-    setQuerySelection((current) => {
-      if (
-        current.conditionId === nextSelection.conditionId
-        && current.outcomeIndex === nextSelection.outcomeIndex
-      ) {
-        return current
-      }
-
-      return nextSelection
-    })
-  }, [])
-
-  const ownerAddress = user?.proxy_wallet_address && user.proxy_wallet_status === 'deployed'
-    ? user.proxy_wallet_address
-    : null
-
-  useEffect(() => {
+  useEffect(function resetActiveMarketViewWhenInitialChanges() {
     setActiveMarketViewKey(resolvedInitialMarketViewKey)
 
-    return () => {}
+    return function noopResetActiveMarketViewCleanup() {}
   }, [resolvedInitialMarketViewKey])
 
   const activeMarketView = useMemo(
@@ -1598,17 +1626,151 @@ export default function SportsEventCenter({
       ?? null,
     [activeMarketViewKey, normalizedMarketViewCards, resolvedInitialMarketViewKey],
   )
-  const heroCard = card
-  const activeSourceCard = activeMarketView?.card ?? card
-  const activeCard = useMemo(
-    () => resolveNormalizedSegmentedEsportsCard(activeSourceCard, vertical),
-    [activeSourceCard, vertical],
+
+  return {
+    normalizedMarketViewCards,
+    activeMarketView,
+    activeMarketViewKey,
+    setActiveMarketViewKey,
+  }
+}
+
+function useEsportsSegmentTabState({
+  activeCard,
+  hasEsportsSegmentedLayout,
+  initialMarketSlug,
+}: {
+  activeCard: SportsGamesCard
+  hasEsportsSegmentedLayout: boolean
+  initialMarketSlug: string | null
+}) {
+  const esportsSegmentTabNumbers = useMemo(() => {
+    const numbers = new Set<number>()
+
+    activeCard.detailMarkets.forEach((market) => {
+      const mapNumber = parseEsportsSegmentNumber(market)
+      if (mapNumber != null) {
+        numbers.add(mapNumber)
+      }
+    })
+
+    return Array.from(numbers).sort((left, right) => left - right)
+  }, [activeCard.detailMarkets])
+  const initialEsportsSegmentTabKey = useMemo<EsportsLayoutTabKey>(() => {
+    if (!hasEsportsSegmentedLayout || !initialMarketSlug) {
+      return 'series'
+    }
+
+    const matchedMarket = activeCard.detailMarkets.find(market => market.slug === initialMarketSlug) ?? null
+    const mapNumber = parseEsportsSegmentNumber(matchedMarket)
+    if (mapNumber == null) {
+      return 'series'
+    }
+
+    return esportsSegmentTabNumbers.includes(mapNumber)
+      ? resolveEsportsSegmentTabKey(mapNumber)
+      : 'series'
+  }, [activeCard.detailMarkets, esportsSegmentTabNumbers, hasEsportsSegmentedLayout, initialMarketSlug])
+  const [activeEsportsSegmentTabKey, setActiveEsportsSegmentTabKey] = useState<EsportsLayoutTabKey>(initialEsportsSegmentTabKey)
+  const activeEsportsSegmentNumber = useMemo(
+    () => parseEsportsSegmentTabNumber(activeEsportsSegmentTabKey),
+    [activeEsportsSegmentTabKey],
   )
-  const hasMultipleMarketViews = normalizedMarketViewCards.length > 1
-  const isGameLinesView = (activeMarketView?.key ?? 'gameLines') === 'gameLines'
-  const isHalftimeResultView = activeMarketView?.key === 'halftimeResult'
-  const baseUsesSectionLayout = isGameLinesView || isHalftimeResultView
-  const heroGroupedButtons = useMemo(() => groupButtonsByMarketType(heroCard.buttons), [heroCard.buttons])
+  const [activeSeriesPreviewSegmentNumber, setActiveSeriesPreviewSegmentNumber] = useState<number | null>(
+    esportsSegmentTabNumbers[0] ?? null,
+  )
+  const [activeSeriesSpreadPickerNumber, setActiveSeriesSpreadPickerNumber] = useState<number | null>(
+    esportsSegmentTabNumbers[0] ?? null,
+  )
+
+  useEffect(function resetActiveEsportsSegmentTabKey() {
+    setActiveEsportsSegmentTabKey(initialEsportsSegmentTabKey)
+
+    return function noopResetActiveEsportsSegmentTabKeyCleanup() {}
+  }, [initialEsportsSegmentTabKey])
+
+  useEffect(function clampActiveSeriesPreviewSegmentNumber() {
+    setActiveSeriesPreviewSegmentNumber(current => (
+      current != null && esportsSegmentTabNumbers.includes(current)
+        ? current
+        : (esportsSegmentTabNumbers[0] ?? null)
+    ))
+
+    return function noopClampActiveSeriesPreviewSegmentNumberCleanup() {}
+  }, [esportsSegmentTabNumbers])
+
+  useEffect(function clampActiveSeriesSpreadPickerNumber() {
+    setActiveSeriesSpreadPickerNumber(current => (
+      current != null && esportsSegmentTabNumbers.includes(current)
+        ? current
+        : (esportsSegmentTabNumbers[0] ?? null)
+    ))
+
+    return function noopClampActiveSeriesSpreadPickerNumberCleanup() {}
+  }, [esportsSegmentTabNumbers])
+
+  return {
+    esportsSegmentTabNumbers,
+    activeEsportsSegmentTabKey,
+    setActiveEsportsSegmentTabKey,
+    activeEsportsSegmentNumber,
+    activeSeriesPreviewSegmentNumber,
+    setActiveSeriesPreviewSegmentNumber,
+    activeSeriesSpreadPickerNumber,
+    setActiveSeriesSpreadPickerNumber,
+  }
+}
+
+function useUserPositionsQuery({ ownerAddress, activeCardId }: { ownerAddress: string | null, activeCardId: string }) {
+  return useQuery<UserPosition[]>({
+    queryKey: ['sports-event-user-positions', ownerAddress, activeCardId],
+    enabled: Boolean(ownerAddress),
+    staleTime: 1000 * 30,
+    gcTime: 1000 * 60 * 10,
+    refetchInterval: ownerAddress ? 15_000 : false,
+    refetchIntervalInBackground: true,
+    queryFn: ({ signal }) => fetchUserPositionsForMarket({
+      pageParam: 0,
+      userAddress: ownerAddress!,
+      status: 'active',
+      signal,
+    }),
+  })
+}
+
+function useRedeemModalState(activeCardId: string) {
+  const [claimedConditionIds, setClaimedConditionIds] = useState<Record<string, true>>({})
+  const [redeemSectionKey, setRedeemSectionKey] = useState<EventSectionKey | null>(null)
+  const [redeemDefaultConditionId, setRedeemDefaultConditionId] = useState<string | null>(null)
+
+  useEffect(function resetRedeemStateOnCardChange() {
+    setClaimedConditionIds(() => (activeCardId ? {} : {}))
+    setRedeemSectionKey(() => (activeCardId ? null : null))
+    setRedeemDefaultConditionId(() => (activeCardId ? null : null))
+
+    return function noopResetRedeemStateOnCardChangeCleanup() {}
+  }, [activeCardId])
+
+  return {
+    claimedConditionIds,
+    setClaimedConditionIds,
+    redeemSectionKey,
+    setRedeemSectionKey,
+    redeemDefaultConditionId,
+    setRedeemDefaultConditionId,
+  }
+}
+
+function useFormatButtonOdds(oddsFormat: OddsFormat) {
+  return useCallback((cents: number) => {
+    if (oddsFormat === 'price') {
+      return `${cents}¢`
+    }
+    return formatOddsFromCents(cents, oddsFormat)
+  }, [oddsFormat])
+}
+
+function useActiveCardPriceMap(activeCard: SportsGamesCard) {
   const detailMarketByConditionId = useMemo(
     () => new Map(activeCard.detailMarkets.map(market => [market.condition_id, market] as const)),
     [activeCard.detailMarkets],
@@ -1654,110 +1816,19 @@ export default function SportsEventCenter({
 
     return priceByKey
   }, [activeCard.buttons, buttonOrderBookSummaries, detailMarketByConditionId])
-  const { singular: segmentLabel, plural: segmentPluralLabel } = useMemo(
-    () => resolveEsportsSegmentLabels(activeCard),
-    [activeCard],
-  )
-  const esportsSegmentTabNumbers = useMemo(() => {
-    const numbers = new Set<number>()
 
-    activeCard.detailMarkets.forEach((market) => {
-      const mapNumber = parseEsportsSegmentNumber(market)
-      if (mapNumber != null) {
-        numbers.add(mapNumber)
-      }
-    })
+  return { detailMarketByConditionId, buttonPriceCentsByKey }
+}
 
-    return Array.from(numbers).sort((left, right) => left - right)
-  }, [activeCard.detailMarkets])
-  const hasEsportsSegmentedLayout = useMemo(
-    () => baseUsesSectionLayout && isSegmentedEsportsEventCard(activeCard, vertical) && esportsSegmentTabNumbers.length > 0,
-    [activeCard, baseUsesSectionLayout, esportsSegmentTabNumbers.length, vertical],
-  )
-  const initialEsportsSegmentTabKey = useMemo<EsportsLayoutTabKey>(() => {
-    if (!hasEsportsSegmentedLayout || !initialMarketSlug) {
-      return 'series'
-    }
-
-    const matchedMarket = activeCard.detailMarkets.find(market => market.slug === initialMarketSlug) ?? null
-    const mapNumber = parseEsportsSegmentNumber(matchedMarket)
-    if (mapNumber == null) {
-      return 'series'
-    }
-
-    return esportsSegmentTabNumbers.includes(mapNumber)
-      ? resolveEsportsSegmentTabKey(mapNumber)
-      : 'series'
-  }, [activeCard.detailMarkets, esportsSegmentTabNumbers, hasEsportsSegmentedLayout, initialMarketSlug])
-  const [activeEsportsSegmentTabKey, setActiveEsportsSegmentTabKey] = useState<EsportsLayoutTabKey>(initialEsportsSegmentTabKey)
-  const activeEsportsSegmentNumber = useMemo(
-    () => parseEsportsSegmentTabNumber(activeEsportsSegmentTabKey),
-    [activeEsportsSegmentTabKey],
-  )
-  const [activeSeriesPreviewSegmentNumber, setActiveSeriesPreviewSegmentNumber] = useState<number | null>(
-    esportsSegmentTabNumbers[0] ?? null,
-  )
-  const [activeSeriesSpreadPickerNumber, setActiveSeriesSpreadPickerNumber] = useState<number | null>(
-    esportsSegmentTabNumbers[0] ?? null,
-  )
-  const usesSectionLayout = baseUsesSectionLayout && (!hasEsportsSegmentedLayout || activeEsportsSegmentTabKey === 'series')
-
-  useEffect(() => {
-    setActiveEsportsSegmentTabKey(initialEsportsSegmentTabKey)
-
-    return () => {}
-  }, [initialEsportsSegmentTabKey])
-
-  useEffect(() => {
-    setActiveSeriesPreviewSegmentNumber(current => (
-      current != null && esportsSegmentTabNumbers.includes(current)
-        ? current
-        : (esportsSegmentTabNumbers[0] ?? null)
-    ))
-
-    return () => {}
-  }, [esportsSegmentTabNumbers])
-
-  useEffect(() => {
-    setActiveSeriesSpreadPickerNumber(current => (
-      current != null && esportsSegmentTabNumbers.includes(current)
-        ? current
-        : (esportsSegmentTabNumbers[0] ?? null)
-    ))
-
-    return () => {}
-  }, [esportsSegmentTabNumbers])
-
-  const { data: userPositions } = useQuery<UserPosition[]>({
-    queryKey: ['sports-event-user-positions', ownerAddress, activeCard.id],
-    enabled: Boolean(ownerAddress),
-    staleTime: 1000 * 30,
-    gcTime: 1000 * 60 * 10,
-    refetchInterval: ownerAddress ? 15_000 : false,
-    refetchIntervalInBackground: true,
-    queryFn: ({ signal }) => fetchUserPositionsForMarket({
-      pageParam: 0,
-      userAddress: ownerAddress!,
-      status: 'active',
-      signal,
-    }),
-  })
-
-  useEffect(() => {
-    setClaimedConditionIds(() => (activeCard.id ? {} : {}))
-    setRedeemSectionKey(() => (activeCard.id ? null : null))
-    setRedeemDefaultConditionId(() => (activeCard.id ? null : null))
-
-    return () => {}
-  }, [activeCard.id])
-
-  const formatButtonOdds = useCallback((cents: number) => {
-    if (oddsFormat === 'price') {
-      return `${cents}¢`
-    }
-    return formatOddsFromCents(cents, oddsFormat)
-  }, [oddsFormat])
-
+function useGroupedButtons({
+  activeCard,
+  detailMarketByConditionId,
+  hasEsportsSegmentedLayout,
+}: {
+  activeCard: SportsGamesCard
+  detailMarketByConditionId: Map<string, SportsGamesCard['detailMarkets'][number]>
+  hasEsportsSegmentedLayout: boolean
+}) {
   const groupedButtons = useMemo(() => {
     if (!hasEsportsSegmentedLayout) {
       return groupButtonsByMarketType(activeCard.buttons)
@@ -1830,7 +1901,31 @@ export default function SportsEventCenter({
     return resolved
   }, [detailMarketByConditionId, groupedButtons])
 
-  const claimGroupsBySection = useMemo<Record<EventSectionKey, SportsRedeemModalGroup[]>>(() => {
+  return {
+    groupedButtons,
+    buttonByConditionAndOutcome,
+    firstButtonByConditionId,
+    availableSections,
+    sectionResolvedByKey,
+  }
+}
+
+function useClaimGroupsBySection({
+  activeCard,
+  buttonByConditionAndOutcome,
+  claimedConditionIds,
+  detailMarketByConditionId,
+  firstButtonByConditionId,
+  userPositions,
+}: {
+  activeCard: SportsGamesCard
+  buttonByConditionAndOutcome: Map<string, SportsGamesButton>
+  claimedConditionIds: Record<string, true>
+  detailMarketByConditionId: Map<string, SportsGamesCard['detailMarkets'][number]>
+  firstButtonByConditionId: Map<string, SportsGamesButton>
+  userPositions: UserPosition[] | undefined
+}) {
+  return useMemo<Record<EventSectionKey, SportsRedeemModalGroup[]>>(() => {
     const bySection: Record<EventSectionKey, SportsRedeemModalGroup[]> = {
       moneyline: [],
       spread: [],
@@ -1990,8 +2085,18 @@ export default function SportsEventCenter({
 
     return bySection
   }, [activeCard, buttonByConditionAndOutcome, claimedConditionIds, detailMarketByConditionId, firstButtonByConditionId, userPositions])
+}
 
-  const marketSlugToButtonKey = useMemo(() => {
+function useMarketSlugToButtonKey({
+  activeCard,
+  querySelection,
+  initialMarketSlug,
+}: {
+  activeCard: SportsGamesCard
+  querySelection: SportsEventQuerySelection
+  initialMarketSlug: string | null
+}) {
+  return useMemo(() => {
     const requestedConditionId = querySelection.conditionId
     const requestedOutcomeIndex = querySelection.outcomeIndex
 
@@ -2029,38 +2134,23 @@ export default function SportsEventCenter({
     querySelection.conditionId,
     querySelection.outcomeIndex,
   ])
+}
 
-  const [selectedButtonBySection, setSelectedButtonBySection] = useState<Record<EventSectionKey, string | null>>({
-    moneyline: null,
-    spread: null,
-    total: null,
-    btts: null,
-  })
-  const [selectedAuxiliaryButtonByConditionId, setSelectedAuxiliaryButtonByConditionId] = useState<
-    Record<string, string | null>
-  >({})
-  const [activeTradeButtonKey, setActiveTradeButtonKey] = useState<string | null>(null)
-  const [openSectionKey, setOpenSectionKey] = useState<EventSectionKey | null>(null)
-  const [openAuxiliaryConditionId, setOpenAuxiliaryConditionId] = useState<string | null>(null)
-  const [tabBySection, setTabBySection] = useState<Record<EventSectionKey, DetailsTab>>({
-    moneyline: 'orderBook',
-    spread: 'orderBook',
-    total: 'orderBook',
-    btts: 'orderBook',
-  })
-  const [tabByAuxiliaryConditionId, setTabByAuxiliaryConditionId] = useState<Record<string, DetailsTab>>({})
-  const previousCardIdRef = useRef<string | null>(null)
-  const appliedMarketSlugSelectionRef = useRef<string | null>(null)
-  const pushedOrderSelectionRef = useRef<string | null>(null)
-  const currentOrderSelectionRef = useRef<{
-    eventId: string | null
-    conditionId: string | null
-    outcomeIndex: number | null
-  }>({
-    eventId: null,
-    conditionId: null,
-    outcomeIndex: null,
-  })
+function useAuxiliaryMarketCards({
+  activeCard,
+  baseUsesSectionLayout,
+  hasEsportsSegmentedLayout,
+  activeEsportsSegmentTabKey,
+  activeEsportsSegmentNumber,
+  activeSeriesPreviewSegmentNumber,
+}: {
+  activeCard: SportsGamesCard
+  baseUsesSectionLayout: boolean
+  hasEsportsSegmentedLayout: boolean
+  activeEsportsSegmentTabKey: EsportsLayoutTabKey
+  activeEsportsSegmentNumber: number | null
+  activeSeriesPreviewSegmentNumber: number | null
+}) {
   const auxiliaryMarketCards = useMemo<AuxiliaryMarketPanel[]>(() => {
     const buttonsByConditionId = new Map<string, SportsGamesButton[]>()
 
@@ -2178,129 +2268,17 @@ export default function SportsEventCenter({
       ?? seriesPreviewSegmentWinnerPanels[0]
       ?? null
   }, [activeSeriesPreviewSegmentNumber, seriesPreviewSegmentWinnerPanels])
-  const selectedSpreadSectionButton = useMemo(() => {
-    if (selectedButtonBySection.spread) {
-      const selected = activeCard.buttons.find(button => button.key === selectedButtonBySection.spread) ?? null
-      if (selected?.marketType === 'spread') {
-        return selected
-      }
-    }
+  const auxiliaryPanelKeyByButtonKey = useMemo(() => {
+    const map = new Map<string, string>()
 
-    return groupedButtons.spread[0] ?? null
-  }, [activeCard.buttons, groupedButtons.spread, selectedButtonBySection.spread])
-  const selectedTotalSectionButton = useMemo(() => {
-    if (selectedButtonBySection.total) {
-      const selected = activeCard.buttons.find(button => button.key === selectedButtonBySection.total) ?? null
-      if (selected?.marketType === 'total') {
-        return selected
-      }
-    }
-
-    return groupedButtons.total[0] ?? null
-  }, [activeCard.buttons, groupedButtons.total, selectedButtonBySection.total])
-  const seriesSpreadSegmentOptions = useMemo(() => {
-    if (!hasEsportsSegmentedLayout) {
-      return [] as Array<{
-        number: number
-        conditionIds: string[]
-        buttonsByConditionId: Map<string, SportsGamesButton[]>
-      }>
-    }
-
-    const byNumber = new Map<number, {
-      number: number
-      conditionIds: string[]
-      buttonsByConditionId: Map<string, SportsGamesButton[]>
-    }>()
-
-    groupedButtons.spread.forEach((button) => {
-      const market = detailMarketByConditionId.get(button.conditionId) ?? null
-      const number = parseEsportsSegmentNumber(market)
-      if (number == null) {
-        return
-      }
-
-      const existing = byNumber.get(number)
-      if (existing) {
-        if (!existing.conditionIds.includes(button.conditionId)) {
-          existing.conditionIds.push(button.conditionId)
-        }
-        const currentButtons = existing.buttonsByConditionId.get(button.conditionId) ?? []
-        currentButtons.push(button)
-        existing.buttonsByConditionId.set(button.conditionId, currentButtons)
-        return
-      }
-
-      byNumber.set(number, {
-        number,
-        conditionIds: [button.conditionId],
-        buttonsByConditionId: new Map([[button.conditionId, [button]]]),
+    auxiliaryMarketCards.forEach((entry) => {
+      entry.buttons.forEach((button) => {
+        map.set(button.key, entry.key)
       })
     })
 
-    return Array.from(byNumber.values())
-      .map(option => ({
-        ...option,
-        buttonsByConditionId: new Map(
-          Array.from(option.buttonsByConditionId.entries())
-            .map(([conditionId, buttons]) => [conditionId, sortSectionButtons('spread', buttons)] as const),
-        ),
-      }))
-      .sort((left, right) => left.number - right.number)
-  }, [detailMarketByConditionId, groupedButtons.spread, hasEsportsSegmentedLayout])
-  const activeSeriesSpreadSegmentOption = useMemo(() => {
-    if (seriesSpreadSegmentOptions.length === 0) {
-      return null
-    }
-
-    if (activeSeriesSpreadPickerNumber != null) {
-      const byPickerNumber = seriesSpreadSegmentOptions.find(option => option.number === activeSeriesSpreadPickerNumber)
-      if (byPickerNumber) {
-        return byPickerNumber
-      }
-    }
-
-    const selectedMarket = selectedSpreadSectionButton
-      ? detailMarketByConditionId.get(selectedSpreadSectionButton.conditionId) ?? null
-      : null
-    const selectedNumber = parseEsportsSegmentNumber(selectedMarket)
-    if (selectedNumber != null) {
-      return seriesSpreadSegmentOptions.find(option => option.number === selectedNumber)
-        ?? seriesSpreadSegmentOptions[0]
-        ?? null
-    }
-
-    return seriesSpreadSegmentOptions[0] ?? null
-  }, [
-    activeSeriesSpreadPickerNumber,
-    detailMarketByConditionId,
-    selectedSpreadSectionButton,
-    seriesSpreadSegmentOptions,
-  ])
-  const activeSeriesSpreadSegmentNumber = activeSeriesSpreadSegmentOption?.number ?? null
-  const activeSeriesSpreadConditionId = useMemo(() => {
-    if (!activeSeriesSpreadSegmentOption) {
-      return null
-    }
-
-    const currentSpreadConditionId = selectedSpreadSectionButton?.conditionId ?? null
-    if (
-      currentSpreadConditionId
-      && activeSeriesSpreadSegmentOption.buttonsByConditionId.has(currentSpreadConditionId)
-    ) {
-      return currentSpreadConditionId
-    }
-
-    return activeSeriesSpreadSegmentOption.conditionIds[0] ?? null
-  }, [activeSeriesSpreadSegmentOption, selectedSpreadSectionButton])
-  const seriesSpreadSegmentPickerOptions = useMemo(
-    () => seriesSpreadSegmentOptions.map(option => ({
-      key: `spread-segment-${option.number}`,
-      label: `${option.number}`,
-      number: option.number,
-    })),
-    [seriesSpreadSegmentOptions],
-  )
+    return map
+  }, [auxiliaryMarketCards])
   const seriesWinnerSegmentPickerOptions = useMemo(
     () => seriesPreviewSegmentWinnerPanels
       .filter((panel): panel is AuxiliaryMarketPanel & { mapNumber: number } => panel.mapNumber != null)
@@ -2311,163 +2289,57 @@ export default function SportsEventCenter({
       })),
     [seriesPreviewSegmentWinnerPanels],
   )
-  const seriesTotalLinePickerOptions = useMemo(() => {
-    if (!hasEsportsSegmentedLayout) {
-      return [] as SportsLinePickerOption[]
-    }
 
-    const allowedConditionIds = new Set(groupedButtons.total.map(button => button.conditionId))
-    return buildLinePickerOptions(activeCard, 'total')
-      .filter(option => allowedConditionIds.has(option.conditionId))
-  }, [activeCard, groupedButtons.total, hasEsportsSegmentedLayout])
-  const activeSeriesTotalLineOption = useMemo(() => {
-    if (seriesTotalLinePickerOptions.length === 0) {
-      return null
-    }
+  return {
+    auxiliaryMarketCards,
+    renderedAuxiliaryMarketCards,
+    seriesPreviewSegmentWinnerPanels,
+    activeSeriesPreviewSegmentWinnerPanel,
+    auxiliaryPanelKeyByButtonKey,
+    seriesWinnerSegmentPickerOptions,
+  }
+}
 
-    if (selectedTotalSectionButton) {
-      return seriesTotalLinePickerOptions.find(option => option.conditionId === selectedTotalSectionButton.conditionId)
-        ?? seriesTotalLinePickerOptions[0]
-        ?? null
-    }
+function useSelectionState({
+  activeCard,
+  auxiliaryPanelsForSelection,
+  detailMarketByConditionId,
+  groupedButtons,
+  usesSectionLayout,
+  marketSlugToButtonKey,
+  renderedAuxiliaryMarketCards,
+}: {
+  activeCard: SportsGamesCard
+  auxiliaryPanelsForSelection: AuxiliaryMarketPanel[]
+  detailMarketByConditionId: Map<string, SportsGamesCard['detailMarkets'][number]>
+  groupedButtons: Record<SportsGamesMarketType, SportsGamesButton[]>
+  usesSectionLayout: boolean
+  marketSlugToButtonKey: string | null
+  renderedAuxiliaryMarketCards: AuxiliaryMarketPanel[]
+}) {
+  const [selectedButtonBySection, setSelectedButtonBySection] = useState<Record<EventSectionKey, string | null>>({
+    moneyline: null,
+    spread: null,
+    total: null,
+    btts: null,
+  })
+  const [selectedAuxiliaryButtonByConditionId, setSelectedAuxiliaryButtonByConditionId] = useState<
+    Record<string, string | null>
+  >({})
+  const [activeTradeButtonKey, setActiveTradeButtonKey] = useState<string | null>(null)
+  const [openSectionKey, setOpenSectionKey] = useState<EventSectionKey | null>(null)
+  const [openAuxiliaryConditionId, setOpenAuxiliaryConditionId] = useState<string | null>(null)
+  const [tabBySection, setTabBySection] = useState<Record<EventSectionKey, DetailsTab>>({
+    moneyline: 'orderBook',
+    spread: 'orderBook',
+    total: 'orderBook',
+    btts: 'orderBook',
+  })
+  const [tabByAuxiliaryConditionId, setTabByAuxiliaryConditionId] = useState<Record<string, DetailsTab>>({})
+  const previousCardIdRef = useRef<string | null>(null)
+  const appliedMarketSlugSelectionRef = useRef<string | null>(null)
 
-    return seriesTotalLinePickerOptions[0] ?? null
-  }, [selectedTotalSectionButton, seriesTotalLinePickerOptions])
-  const activeSeriesTotalConditionId = activeSeriesTotalLineOption?.conditionId ?? null
-  const activeSeriesTotalLineValue = activeSeriesTotalLineOption?.lineValue ?? null
-  const seriesTotalPickerOptions = useMemo(
-    () => seriesTotalLinePickerOptions.map(option => ({
-      key: `total-line-${option.conditionId}`,
-      label: option.label,
-      number: option.lineValue,
-    })),
-    [seriesTotalLinePickerOptions],
-  )
-  const auxiliaryPanelsForSelection = auxiliaryMarketCards
-  const auxiliaryPanelKeyByButtonKey = useMemo(() => {
-    const map = new Map<string, string>()
-
-    auxiliaryPanelsForSelection.forEach((entry) => {
-      entry.buttons.forEach((button) => {
-        map.set(button.key, entry.key)
-      })
-    })
-
-    return map
-  }, [auxiliaryPanelsForSelection])
-  const updateSectionSelection = useCallback((
-    sectionKey: EventSectionKey,
-    buttonKey: string,
-    options?: { panelMode?: 'full' | 'partial' | 'preserve' },
-  ) => {
-    setSelectedButtonBySection((current) => {
-      if (current[sectionKey] === buttonKey) {
-        return current
-      }
-      return {
-        ...current,
-        [sectionKey]: buttonKey,
-      }
-    })
-
-    setActiveTradeButtonKey(buttonKey)
-
-    const panelMode = options?.panelMode ?? 'full'
-    const shouldOpenMobileSheetOnly = isMobile && panelMode === 'full'
-
-    if (shouldOpenMobileSheetOnly) {
-      setIsMobileOrderPanelOpen(true)
-    }
-
-    if (panelMode === 'full' && !shouldOpenMobileSheetOnly) {
-      setOpenAuxiliaryConditionId(null)
-      setOpenSectionKey(sectionKey)
-    }
-  }, [isMobile, setIsMobileOrderPanelOpen])
-
-  const handlePickSeriesPreviewSegmentNumber = useCallback((number: number) => {
-    setActiveSeriesPreviewSegmentNumber(number)
-  }, [])
-
-  const handlePickSeriesSpreadSegmentNumber = useCallback((number: number) => {
-    setActiveSeriesSpreadPickerNumber(number)
-
-    const spreadOption = seriesSpreadSegmentOptions.find(option => option.number === number)
-    if (!spreadOption) {
-      return
-    }
-
-    const currentSpreadConditionId = selectedSpreadSectionButton?.conditionId ?? null
-    const preferredConditionId = currentSpreadConditionId && spreadOption.buttonsByConditionId.has(currentSpreadConditionId)
-      ? currentSpreadConditionId
-      : spreadOption.conditionIds[0] ?? null
-    if (!preferredConditionId) {
-      return
-    }
-
-    const buttons = spreadOption.buttonsByConditionId.get(preferredConditionId) ?? []
-    const preferredButton = resolvePreferredLinePickerButton(buttons, selectedSpreadSectionButton)
-    if (!preferredButton) {
-      return
-    }
-
-    updateSectionSelection('spread', preferredButton.key, { panelMode: 'preserve' })
-  }, [selectedSpreadSectionButton, seriesSpreadSegmentOptions, updateSectionSelection])
-  const handlePickSeriesTotalLineValue = useCallback((lineValue: number) => {
-    const option = seriesTotalLinePickerOptions.find(candidate => candidate.lineValue === lineValue) ?? null
-    if (!option) {
-      return
-    }
-
-    const preferredButton = resolvePreferredLinePickerButton(option.buttons, selectedTotalSectionButton)
-    if (!preferredButton) {
-      return
-    }
-
-    updateSectionSelection('total', preferredButton.key, { panelMode: 'preserve' })
-  }, [selectedTotalSectionButton, seriesTotalLinePickerOptions, updateSectionSelection])
-
-  const resolveSeriesSpreadSelectedButtonKey = useCallback(() => {
-    if (!activeSeriesSpreadSegmentOption) {
-      return null
-    }
-
-    const preferredConditionId = activeSeriesSpreadConditionId
-      ?? activeSeriesSpreadSegmentOption.conditionIds[0]
-      ?? null
-    if (!preferredConditionId) {
-      return null
-    }
-
-    const buttons = activeSeriesSpreadSegmentOption.buttonsByConditionId.get(preferredConditionId) ?? []
-
-    return resolvePreferredLinePickerButton(buttons, selectedSpreadSectionButton)?.key
-      ?? null
-  }, [activeSeriesSpreadConditionId, activeSeriesSpreadSegmentOption, selectedSpreadSectionButton])
-  const resolveSeriesTotalSelectedButtonKey = useCallback(() => {
-    if (!activeSeriesTotalLineOption) {
-      return null
-    }
-
-    return resolvePreferredLinePickerButton(activeSeriesTotalLineOption.buttons, selectedTotalSectionButton)?.key
-      ?? null
-  }, [activeSeriesTotalLineOption, selectedTotalSectionButton])
-
-  useEffect(() => {
-    const selectedMarket = selectedSpreadSectionButton
-      ? detailMarketByConditionId.get(selectedSpreadSectionButton.conditionId) ?? null
-      : null
-    const selectedNumber = parseEsportsSegmentNumber(selectedMarket)
-    if (selectedNumber == null) {
-      return
-    }
-
-    setActiveSeriesSpreadPickerNumber(current => current === selectedNumber ? current : selectedNumber)
-
-    return () => {}
-  }, [detailMarketByConditionId, selectedSpreadSectionButton])
-
-  useEffect(() => {
+  useEffect(function syncSelectionsOnActiveCardChange() {
     const isNewCard = previousCardIdRef.current !== activeCard.id
     previousCardIdRef.current = activeCard.id
     const marketSlugSelectionSignature = buildMarketSlugSelectionSignature({
@@ -2697,7 +2569,7 @@ export default function SportsEventCenter({
       appliedMarketSlugSelectionRef.current = marketSlugSelectionSignature
     }
 
-    return () => {}
+    return function noopSyncSelectionsOnActiveCardChangeCleanup() {}
   }, [
     activeCard,
     activeCard.id,
@@ -2710,32 +2582,390 @@ export default function SportsEventCenter({
     renderedAuxiliaryMarketCards,
   ])
 
-  useEffect(() => {
-    if (!hasEsportsSegmentedLayout || !marketSlugToButtonKey) {
+  return {
+    selectedButtonBySection,
+    setSelectedButtonBySection,
+    selectedAuxiliaryButtonByConditionId,
+    setSelectedAuxiliaryButtonByConditionId,
+    activeTradeButtonKey,
+    setActiveTradeButtonKey,
+    openSectionKey,
+    setOpenSectionKey,
+    openAuxiliaryConditionId,
+    setOpenAuxiliaryConditionId,
+    tabBySection,
+    setTabBySection,
+    tabByAuxiliaryConditionId,
+    setTabByAuxiliaryConditionId,
+  }
+}
+
+function useDerivedActiveCard({
+  card,
+  activeMarketView,
+  vertical,
+}: {
+  card: SportsGamesCard
+  activeMarketView: SportsGamesCardMarketView | null
+  vertical: SportsVertical
+}) {
+  const activeSourceCard = activeMarketView?.card ?? card
+  const activeCard = useMemo(
+    () => resolveNormalizedSegmentedEsportsCard(activeSourceCard, vertical),
+    [activeSourceCard, vertical],
+  )
+  const heroGroupedButtons = useMemo(() => groupButtonsByMarketType(card.buttons), [card.buttons])
+  const { singular: segmentLabel, plural: segmentPluralLabel } = useMemo(
+    () => resolveEsportsSegmentLabels(activeCard),
+    [activeCard],
+  )
+  const isGameLinesView = (activeMarketView?.key ?? 'gameLines') === 'gameLines'
+  const isHalftimeResultView = activeMarketView?.key === 'halftimeResult'
+  const baseUsesSectionLayout = isGameLinesView || isHalftimeResultView
+  const hasEsportsSegmentedLayout = useMemo(
+    () => baseUsesSectionLayout
+      && isSegmentedEsportsEventCard(activeCard, vertical)
+      && activeCard.detailMarkets.some(market => parseEsportsSegmentNumber(market) != null),
+    [activeCard, baseUsesSectionLayout, vertical],
+  )
+
+  return {
+    activeCard,
+    heroGroupedButtons,
+    segmentLabel,
+    segmentPluralLabel,
+    isHalftimeResultView,
+    baseUsesSectionLayout,
+    hasEsportsSegmentedLayout,
+  }
+}
+
+function useSelectedSectionButtons({
+  activeCard,
+  groupedButtons,
+  selectedButtonBySection,
+}: {
+  activeCard: SportsGamesCard
+  groupedButtons: Record<SportsGamesMarketType, SportsGamesButton[]>
+  selectedButtonBySection: Record<EventSectionKey, string | null>
+}) {
+  const selectedSpreadSectionButton = useMemo(() => {
+    if (selectedButtonBySection.spread) {
+      const selected = activeCard.buttons.find(button => button.key === selectedButtonBySection.spread) ?? null
+      if (selected?.marketType === 'spread') {
+        return selected
+      }
+    }
+
+    return groupedButtons.spread[0] ?? null
+  }, [activeCard.buttons, groupedButtons.spread, selectedButtonBySection.spread])
+  const selectedTotalSectionButton = useMemo(() => {
+    if (selectedButtonBySection.total) {
+      const selected = activeCard.buttons.find(button => button.key === selectedButtonBySection.total) ?? null
+      if (selected?.marketType === 'total') {
+        return selected
+      }
+    }
+
+    return groupedButtons.total[0] ?? null
+  }, [activeCard.buttons, groupedButtons.total, selectedButtonBySection.total])
+
+  return { selectedSpreadSectionButton, selectedTotalSectionButton }
+}
+
+function useSectionActions({
+  isMobile,
+  setIsMobileOrderPanelOpen,
+  setSelectedButtonBySection,
+  setActiveTradeButtonKey,
+  setOpenSectionKey,
+  setOpenAuxiliaryConditionId,
+  setActiveSeriesPreviewSegmentNumber,
+  setActiveSeriesSpreadPickerNumber,
+  seriesSpreadSegmentOptions,
+  seriesTotalLinePickerOptions,
+  selectedSpreadSectionButton,
+  selectedTotalSectionButton,
+  activeSeriesSpreadSegmentOption,
+  activeSeriesSpreadConditionId,
+  activeSeriesTotalLineOption,
+}: {
+  isMobile: boolean
+  setIsMobileOrderPanelOpen: (open: boolean) => void
+  setSelectedButtonBySection: React.Dispatch<React.SetStateAction<Record<EventSectionKey, string | null>>>
+  setActiveTradeButtonKey: React.Dispatch<React.SetStateAction<string | null>>
+  setOpenSectionKey: React.Dispatch<React.SetStateAction<EventSectionKey | null>>
+  setOpenAuxiliaryConditionId: React.Dispatch<React.SetStateAction<string | null>>
+  setActiveSeriesPreviewSegmentNumber: React.Dispatch<React.SetStateAction<number | null>>
+  setActiveSeriesSpreadPickerNumber: React.Dispatch<React.SetStateAction<number | null>>
+  seriesSpreadSegmentOptions: Array<{
+    number: number
+    conditionIds: string[]
+    buttonsByConditionId: Map<string, SportsGamesButton[]>
+  }>
+  seriesTotalLinePickerOptions: SportsLinePickerOption[]
+  selectedSpreadSectionButton: SportsGamesButton | null
+  selectedTotalSectionButton: SportsGamesButton | null
+  activeSeriesSpreadSegmentOption: {
+    number: number
+    conditionIds: string[]
+    buttonsByConditionId: Map<string, SportsGamesButton[]>
+  } | null
+  activeSeriesSpreadConditionId: string | null
+  activeSeriesTotalLineOption: SportsLinePickerOption | null
+}) {
+  const updateSectionSelection = useCallback((
+    sectionKey: EventSectionKey,
+    buttonKey: string,
+    options?: { panelMode?: 'full' | 'partial' | 'preserve' },
+  ) => {
+    setSelectedButtonBySection((current) => {
+      if (current[sectionKey] === buttonKey) {
+        return current
+      }
+      return {
+        ...current,
+        [sectionKey]: buttonKey,
+      }
+    })
+
+    setActiveTradeButtonKey(buttonKey)
+
+    const panelMode = options?.panelMode ?? 'full'
+    const shouldOpenMobileSheetOnly = isMobile && panelMode === 'full'
+
+    if (shouldOpenMobileSheetOnly) {
+      setIsMobileOrderPanelOpen(true)
+    }
+
+    if (panelMode === 'full' && !shouldOpenMobileSheetOnly) {
+      setOpenAuxiliaryConditionId(null)
+      setOpenSectionKey(sectionKey)
+    }
+  }, [
+    isMobile,
+    setIsMobileOrderPanelOpen,
+    setActiveTradeButtonKey,
+    setOpenAuxiliaryConditionId,
+    setOpenSectionKey,
+    setSelectedButtonBySection,
+  ])
+
+  const handlePickSeriesPreviewSegmentNumber = useCallback((number: number) => {
+    setActiveSeriesPreviewSegmentNumber(number)
+  }, [setActiveSeriesPreviewSegmentNumber])
+
+  const handlePickSeriesSpreadSegmentNumber = useCallback((number: number) => {
+    setActiveSeriesSpreadPickerNumber(number)
+
+    const spreadOption = seriesSpreadSegmentOptions.find(option => option.number === number)
+    if (!spreadOption) {
       return
     }
 
-    const selectedButton = activeCard.buttons.find(button => button.key === marketSlugToButtonKey) ?? null
-    const selectedMarket = selectedButton
-      ? detailMarketByConditionId.get(selectedButton.conditionId) ?? null
-      : null
-
-    if (!selectedMarket) {
+    const currentSpreadConditionId = selectedSpreadSectionButton?.conditionId ?? null
+    const preferredConditionId = currentSpreadConditionId && spreadOption.buttonsByConditionId.has(currentSpreadConditionId)
+      ? currentSpreadConditionId
+      : spreadOption.conditionIds[0] ?? null
+    if (!preferredConditionId) {
       return
     }
 
-    const mapNumber = parseEsportsSegmentNumber(selectedMarket)
-    if (mapNumber != null) {
-      setActiveEsportsSegmentTabKey(resolveEsportsSegmentTabKey(mapNumber))
+    const buttons = spreadOption.buttonsByConditionId.get(preferredConditionId) ?? []
+    const preferredButton = resolvePreferredLinePickerButton(buttons, selectedSpreadSectionButton)
+    if (!preferredButton) {
       return
     }
 
-    setActiveEsportsSegmentTabKey('series')
+    updateSectionSelection('spread', preferredButton.key, { panelMode: 'preserve' })
+  }, [selectedSpreadSectionButton, seriesSpreadSegmentOptions, setActiveSeriesSpreadPickerNumber, updateSectionSelection])
+  const handlePickSeriesTotalLineValue = useCallback((lineValue: number) => {
+    const option = seriesTotalLinePickerOptions.find(candidate => candidate.lineValue === lineValue) ?? null
+    if (!option) {
+      return
+    }
 
-    return () => {}
-  }, [activeCard.buttons, detailMarketByConditionId, hasEsportsSegmentedLayout, marketSlugToButtonKey])
+    const preferredButton = resolvePreferredLinePickerButton(option.buttons, selectedTotalSectionButton)
+    if (!preferredButton) {
+      return
+    }
 
-  const moneylineButtonKey = selectedButtonBySection.moneyline ?? groupedButtons.moneyline[0]?.key ?? null
+    updateSectionSelection('total', preferredButton.key, { panelMode: 'preserve' })
+  }, [selectedTotalSectionButton, seriesTotalLinePickerOptions, updateSectionSelection])
+
+  const resolveSeriesSpreadSelectedButtonKey = useCallback(() => {
+    if (!activeSeriesSpreadSegmentOption) {
+      return null
+    }
+
+    const preferredConditionId = activeSeriesSpreadConditionId
+      ?? activeSeriesSpreadSegmentOption.conditionIds[0]
+      ?? null
+    if (!preferredConditionId) {
+      return null
+    }
+
+    const buttons = activeSeriesSpreadSegmentOption.buttonsByConditionId.get(preferredConditionId) ?? []
+
+    return resolvePreferredLinePickerButton(buttons, selectedSpreadSectionButton)?.key
+      ?? null
+  }, [activeSeriesSpreadConditionId, activeSeriesSpreadSegmentOption, selectedSpreadSectionButton])
+  const resolveSeriesTotalSelectedButtonKey = useCallback(() => {
+    if (!activeSeriesTotalLineOption) {
+      return null
+    }
+
+    return resolvePreferredLinePickerButton(activeSeriesTotalLineOption.buttons, selectedTotalSectionButton)?.key
+      ?? null
+  }, [activeSeriesTotalLineOption, selectedTotalSectionButton])
+
+  return {
+    updateSectionSelection,
+    handlePickSeriesPreviewSegmentNumber,
+    handlePickSeriesSpreadSegmentNumber,
+    handlePickSeriesTotalLineValue,
+    resolveSeriesSpreadSelectedButtonKey,
+    resolveSeriesTotalSelectedButtonKey,
+  }
+}
+
+function useSectionDerivedData({
+  activeCard,
+  groupedButtons,
+  claimGroupsBySection,
+  auxiliaryPanelsForSelection,
+  redeemSectionKey,
+  setRedeemDefaultConditionId,
+  setRedeemSectionKey,
+}: {
+  activeCard: SportsGamesCard
+  groupedButtons: Record<SportsGamesMarketType, SportsGamesButton[]>
+  claimGroupsBySection: Record<EventSectionKey, SportsRedeemModalGroup[]>
+  auxiliaryPanelsForSelection: AuxiliaryMarketPanel[]
+  redeemSectionKey: EventSectionKey | null
+  setRedeemDefaultConditionId: React.Dispatch<React.SetStateAction<string | null>>
+  setRedeemSectionKey: React.Dispatch<React.SetStateAction<EventSectionKey | null>>
+}) {
+  const sectionVolumes = useMemo(() => {
+    const byConditionId = new Map(activeCard.detailMarkets.map(market => [market.condition_id, market] as const))
+    const volumes: Record<EventSectionKey, number> = {
+      moneyline: 0,
+      spread: 0,
+      total: 0,
+      btts: 0,
+    }
+
+    for (const section of SECTION_ORDER) {
+      const conditionIds = Array.from(new Set(groupedButtons[section.key].map(button => button.conditionId)))
+      volumes[section.key] = conditionIds.reduce((sum, conditionId) => {
+        const market = byConditionId.get(conditionId)
+        return sum + (Number(market?.volume ?? 0) || 0)
+      }, 0)
+    }
+
+    return volumes
+  }, [activeCard.detailMarkets, groupedButtons])
+
+  const sectionConditionIdsByKey = useMemo<Record<EventSectionKey, Set<string>>>(() => {
+    return {
+      moneyline: new Set(groupedButtons.moneyline.map(button => button.conditionId)),
+      spread: new Set(groupedButtons.spread.map(button => button.conditionId)),
+      total: new Set(groupedButtons.total.map(button => button.conditionId)),
+      btts: new Set(groupedButtons.btts.map(button => button.conditionId)),
+    }
+  }, [groupedButtons])
+
+  const allCardConditionIds = useMemo(
+    () => new Set(activeCard.detailMarkets.map(market => market.condition_id)),
+    [activeCard.detailMarkets],
+  )
+  const redeemSectionConfig = useMemo(
+    () => (redeemSectionKey ? SECTION_ORDER.find(section => section.key === redeemSectionKey) ?? null : null),
+    [redeemSectionKey],
+  )
+  const redeemModalSections = useMemo<SportsRedeemModalSection[]>(
+    () =>
+      SECTION_ORDER
+        .map(section => ({
+          key: section.key,
+          label: section.label,
+          groups: claimGroupsBySection[section.key],
+        }))
+        .filter(section => section.groups.length > 0),
+    [claimGroupsBySection],
+  )
+  const auxiliaryResolvedByConditionId = useMemo(
+    () => new Map(auxiliaryPanelsForSelection.map(entry => [
+      entry.key,
+      entry.markets.every(market => Boolean(market.is_resolved || market.condition?.resolved)),
+    ] as const)),
+    [auxiliaryPanelsForSelection],
+  )
+  const auxiliaryClaimGroupsByConditionId = useMemo(
+    () => new Map(claimGroupsBySection.moneyline.map(group => [group.conditionId, group] as const)),
+    [claimGroupsBySection],
+  )
+  const handleOpenRedeemForCondition = useCallback((conditionId: string) => {
+    const normalizedConditionId = conditionId.trim()
+    if (!normalizedConditionId) {
+      return
+    }
+
+    const matchedSection = SECTION_ORDER.find(section =>
+      claimGroupsBySection[section.key].some(group => group.conditionId === normalizedConditionId),
+    ) ?? SECTION_ORDER.find(section => sectionConditionIdsByKey[section.key].has(normalizedConditionId))
+    ?? SECTION_ORDER.find(section => claimGroupsBySection[section.key].length > 0)
+    ?? null
+
+    if (!matchedSection) {
+      return
+    }
+
+    setRedeemDefaultConditionId(normalizedConditionId)
+    setRedeemSectionKey(matchedSection.key)
+  }, [claimGroupsBySection, sectionConditionIdsByKey, setRedeemDefaultConditionId, setRedeemSectionKey])
+
+  return {
+    sectionVolumes,
+    sectionConditionIdsByKey,
+    allCardConditionIds,
+    redeemSectionConfig,
+    redeemModalSections,
+    auxiliaryResolvedByConditionId,
+    auxiliaryClaimGroupsByConditionId,
+    handleOpenRedeemForCondition,
+  }
+}
+
+function useActiveTradeContext({
+  activeCard,
+  usesSectionLayout,
+  activeTradeButtonKey,
+  openSectionKey,
+  openAuxiliaryConditionId,
+  selectedButtonBySection,
+  selectedAuxiliaryButtonByConditionId,
+  marketSlugToButtonKey,
+  renderedAuxiliaryMarketCards,
+  moneylineButtonKey,
+  orderEventId,
+  orderMarketConditionId,
+  orderOutcomeIndex,
+}: {
+  activeCard: SportsGamesCard
+  usesSectionLayout: boolean
+  activeTradeButtonKey: string | null
+  openSectionKey: EventSectionKey | null
+  openAuxiliaryConditionId: string | null
+  selectedButtonBySection: Record<EventSectionKey, string | null>
+  selectedAuxiliaryButtonByConditionId: Record<string, string | null>
+  marketSlugToButtonKey: string | null
+  renderedAuxiliaryMarketCards: AuxiliaryMarketPanel[]
+  moneylineButtonKey: string | null
+  orderEventId: string | null
+  orderMarketConditionId: string | null
+  orderOutcomeIndex: number | null
+}) {
   const orderSelectionSyncKey = useMemo(() => {
     if (!orderEventId || !orderMarketConditionId || orderOutcomeIndex == null) {
       return null
@@ -2825,7 +3055,187 @@ export default function SportsEventCenter({
     selectedButtonBySection,
   ])
 
-  useEffect(() => {
+  const activeTradeHeaderContext = useMemo(() => {
+    if (!activeTradeContext) {
+      return null
+    }
+
+    if (!orderMarketConditionId || orderMarketConditionId !== activeTradeContext.market.condition_id) {
+      return activeTradeContext
+    }
+
+    if (orderOutcomeIndex == null) {
+      return activeTradeContext
+    }
+
+    const matchedOutcome = activeTradeContext.market.outcomes.find(
+      outcome => outcome.outcome_index === orderOutcomeIndex,
+    ) ?? activeTradeContext.outcome
+
+    const matchedButton = activeCard.buttons.find(
+      button => (
+        button.conditionId === activeTradeContext.market.condition_id
+        && button.outcomeIndex === orderOutcomeIndex
+      ),
+    ) ?? activeTradeContext.button
+
+    return {
+      ...activeTradeContext,
+      button: matchedButton,
+      outcome: matchedOutcome,
+    }
+  }, [activeTradeContext, activeCard.buttons, orderMarketConditionId, orderOutcomeIndex])
+  const orderPanelOutcomeLabelOverrides = useMemo(
+    () => activeTradeContext
+      ? resolveOrderPanelOutcomeLabelOverrides(
+          activeCard,
+          activeTradeHeaderContext?.market ?? activeTradeContext.market,
+        )
+      : {},
+    [activeCard, activeTradeContext, activeTradeHeaderContext],
+  )
+  const orderPanelOutcomeAccentOverrides = useMemo(
+    () => activeTradeContext
+      ? resolveOrderPanelOutcomeAccentOverrides(
+          activeCard,
+          activeTradeHeaderContext?.market ?? activeTradeContext.market,
+        )
+      : {},
+    [activeCard, activeTradeContext, activeTradeHeaderContext],
+  )
+  const activeTradePrimaryOutcomeIndex = useMemo(() => {
+    if (!activeTradeContext || activeTradeContext.button.marketType !== 'spread') {
+      return null
+    }
+
+    return resolveStableSpreadPrimaryOutcomeIndex(activeCard, activeTradeContext.button.conditionId)
+  }, [activeCard, activeTradeContext])
+
+  return {
+    orderSelectionSyncKey,
+    fallbackButtonFromOrderState,
+    activeTradeContext,
+    activeTradeHeaderContext,
+    orderPanelOutcomeLabelOverrides,
+    orderPanelOutcomeAccentOverrides,
+    activeTradePrimaryOutcomeIndex,
+  }
+}
+
+function useSeriesSpreadPickerSync({
+  selectedSpreadSectionButton,
+  detailMarketByConditionId,
+  setActiveSeriesSpreadPickerNumber,
+}: {
+  selectedSpreadSectionButton: SportsGamesButton | null
+  detailMarketByConditionId: Map<string, SportsGamesCard['detailMarkets'][number]>
+  setActiveSeriesSpreadPickerNumber: (setter: (current: number | null) => number | null) => void
+}) {
+  useEffect(function syncActiveSeriesSpreadPickerToSelection() {
+    const selectedMarket = selectedSpreadSectionButton
+      ? detailMarketByConditionId.get(selectedSpreadSectionButton.conditionId) ?? null
+      : null
+    const selectedNumber = parseEsportsSegmentNumber(selectedMarket)
+    if (selectedNumber == null) {
+      return
+    }
+
+    setActiveSeriesSpreadPickerNumber(current => current === selectedNumber ? current : selectedNumber)
+
+    return function noopSyncActiveSeriesSpreadPickerToSelectionCleanup() {}
+  }, [detailMarketByConditionId, selectedSpreadSectionButton, setActiveSeriesSpreadPickerNumber])
+}
+
+function useEsportsSegmentTabKeySync({
+  hasEsportsSegmentedLayout,
+  marketSlugToButtonKey,
+  activeCard,
+  detailMarketByConditionId,
+  setActiveEsportsSegmentTabKey,
+}: {
+  hasEsportsSegmentedLayout: boolean
+  marketSlugToButtonKey: string | null
+  activeCard: SportsGamesCard
+  detailMarketByConditionId: Map<string, SportsGamesCard['detailMarkets'][number]>
+  setActiveEsportsSegmentTabKey: (value: EsportsLayoutTabKey) => void
+}) {
+  useEffect(function syncEsportsSegmentTabKeyFromMarketSlug() {
+    if (!hasEsportsSegmentedLayout || !marketSlugToButtonKey) {
+      return
+    }
+
+    const selectedButton = activeCard.buttons.find(button => button.key === marketSlugToButtonKey) ?? null
+    const selectedMarket = selectedButton
+      ? detailMarketByConditionId.get(selectedButton.conditionId) ?? null
+      : null
+
+    if (!selectedMarket) {
+      return
+    }
+
+    const mapNumber = parseEsportsSegmentNumber(selectedMarket)
+    if (mapNumber != null) {
+      setActiveEsportsSegmentTabKey(resolveEsportsSegmentTabKey(mapNumber))
+      return
+    }
+
+    setActiveEsportsSegmentTabKey('series')
+
+    return function noopSyncEsportsSegmentTabKeyFromMarketSlugCleanup() {}
+  }, [activeCard.buttons, detailMarketByConditionId, hasEsportsSegmentedLayout, marketSlugToButtonKey, setActiveEsportsSegmentTabKey])
+}
+
+function useOrderStateSync({
+  activeCard,
+  activeTradeContextButtonKey,
+  orderEventId,
+  orderMarketConditionId,
+  orderOutcomeIndex,
+  marketSlugToButtonKey,
+  fallbackButtonFromOrderState,
+  orderSelectionSyncKey,
+  usesSectionLayout,
+  detailMarketByConditionId,
+  auxiliaryPanelKeyByButtonKey,
+  setActiveTradeButtonKey,
+  setSelectedButtonBySection,
+  setSelectedAuxiliaryButtonByConditionId,
+  setOrderEvent,
+  setOrderMarket,
+  setOrderOutcome,
+  setOrderSide,
+}: {
+  activeCard: SportsGamesCard
+  activeTradeContextButtonKey: string | null
+  orderEventId: string | null
+  orderMarketConditionId: string | null
+  orderOutcomeIndex: number | null
+  marketSlugToButtonKey: string | null
+  fallbackButtonFromOrderState: string | null
+  orderSelectionSyncKey: string | null
+  usesSectionLayout: boolean
+  detailMarketByConditionId: Map<string, SportsGamesCard['detailMarkets'][number]>
+  auxiliaryPanelKeyByButtonKey: Map<string, string>
+  setActiveTradeButtonKey: React.Dispatch<React.SetStateAction<string | null>>
+  setSelectedButtonBySection: React.Dispatch<React.SetStateAction<Record<EventSectionKey, string | null>>>
+  setSelectedAuxiliaryButtonByConditionId: React.Dispatch<React.SetStateAction<Record<string, string | null>>>
+  setOrderEvent: (event: SportsGamesCard['event']) => void
+  setOrderMarket: (market: SportsGamesCard['detailMarkets'][number]) => void
+  setOrderOutcome: (outcome: SportsGamesCard['detailMarkets'][number]['outcomes'][number]) => void
+  setOrderSide: (side: typeof ORDER_SIDE[keyof typeof ORDER_SIDE]) => void
+}) {
+  const pushedOrderSelectionRef = useRef<string | null>(null)
+  const currentOrderSelectionRef = useRef<{
+    eventId: string | null
+    conditionId: string | null
+    outcomeIndex: number | null
+  }>({
+    eventId: null,
+    conditionId: null,
+    outcomeIndex: null,
+  })
+
+  useEffect(function applyFallbackOrderStateToSelection() {
     if (marketSlugToButtonKey) {
       return
     }
@@ -2883,7 +3293,7 @@ export default function SportsEventCenter({
       }
     })
 
-    return () => {}
+    return function noopApplyFallbackOrderStateToSelectionCleanup() {}
   }, [
     activeCard.buttons,
     auxiliaryPanelKeyByButtonKey,
@@ -2892,69 +3302,12 @@ export default function SportsEventCenter({
     marketSlugToButtonKey,
     orderSelectionSyncKey,
     usesSectionLayout,
+    setActiveTradeButtonKey,
+    setSelectedAuxiliaryButtonByConditionId,
+    setSelectedButtonBySection,
   ])
 
-  const activeTradeHeaderContext = useMemo(() => {
-    if (!activeTradeContext) {
-      return null
-    }
-
-    if (!orderMarketConditionId || orderMarketConditionId !== activeTradeContext.market.condition_id) {
-      return activeTradeContext
-    }
-
-    if (orderOutcomeIndex == null) {
-      return activeTradeContext
-    }
-
-    const matchedOutcome = activeTradeContext.market.outcomes.find(
-      outcome => outcome.outcome_index === orderOutcomeIndex,
-    ) ?? activeTradeContext.outcome
-
-    const matchedButton = activeCard.buttons.find(
-      button => (
-        button.conditionId === activeTradeContext.market.condition_id
-        && button.outcomeIndex === orderOutcomeIndex
-      ),
-    ) ?? activeTradeContext.button
-
-    return {
-      ...activeTradeContext,
-      button: matchedButton,
-      outcome: matchedOutcome,
-    }
-  }, [activeTradeContext, activeCard.buttons, orderMarketConditionId, orderOutcomeIndex])
-  const orderPanelOutcomeLabelOverrides = useMemo(
-    () => activeTradeContext
-      ? resolveOrderPanelOutcomeLabelOverrides(
-          activeCard,
-          activeTradeHeaderContext?.market ?? activeTradeContext.market,
-        )
-      : {},
-    [activeCard, activeTradeContext, activeTradeHeaderContext],
-  )
-  const orderPanelOutcomeAccentOverrides = useMemo(
-    () => activeTradeContext
-      ? resolveOrderPanelOutcomeAccentOverrides(
-          activeCard,
-          activeTradeHeaderContext?.market ?? activeTradeContext.market,
-        )
-      : {},
-    [activeCard, activeTradeContext, activeTradeHeaderContext],
-  )
-  const pageAboutMarket = activeTradeHeaderContext?.market ?? activeTradeContext?.market ?? null
-
-  const activeTradePrimaryOutcomeIndex = useMemo(() => {
-    if (!activeTradeContext || activeTradeContext.button.marketType !== 'spread') {
-      return null
-    }
-
-    return resolveStableSpreadPrimaryOutcomeIndex(activeCard, activeTradeContext.button.conditionId)
-  }, [activeCard, activeTradeContext])
-
-  const activeTradeContextButtonKey = activeTradeContext?.button.key ?? null
-
-  useEffect(() => {
+  useEffect(function trackCurrentOrderSelection() {
     currentOrderSelectionRef.current = {
       eventId: orderEventId,
       conditionId: orderMarketConditionId,
@@ -2962,7 +3315,7 @@ export default function SportsEventCenter({
     }
   }, [orderEventId, orderMarketConditionId, orderOutcomeIndex])
 
-  useEffect(() => {
+  useEffect(function pushActiveTradeSelectionToOrderState() {
     if (!activeTradeContextButtonKey) {
       pushedOrderSelectionRef.current = null
       return
@@ -2998,7 +3351,7 @@ export default function SportsEventCenter({
     setOrderOutcome(outcome)
     setOrderSide(ORDER_SIDE.BUY)
 
-    return () => {}
+    return function noopPushActiveTradeSelectionToOrderStateCleanup() {}
   }, [
     activeCard,
     activeTradeContextButtonKey,
@@ -3007,35 +3360,444 @@ export default function SportsEventCenter({
     setOrderOutcome,
     setOrderSide,
   ])
+}
 
-  const sectionVolumes = useMemo(() => {
-    const byConditionId = new Map(activeCard.detailMarkets.map(market => [market.condition_id, market] as const))
-    const volumes: Record<EventSectionKey, number> = {
-      moneyline: 0,
-      spread: 0,
-      total: 0,
-      btts: 0,
+function useSeriesSegmentPickerData({
+  activeCard,
+  groupedButtons,
+  detailMarketByConditionId,
+  hasEsportsSegmentedLayout,
+  activeSeriesSpreadPickerNumber,
+  selectedSpreadSectionButton,
+  selectedTotalSectionButton,
+}: {
+  activeCard: SportsGamesCard
+  groupedButtons: Record<SportsGamesMarketType, SportsGamesButton[]>
+  detailMarketByConditionId: Map<string, SportsGamesCard['detailMarkets'][number]>
+  hasEsportsSegmentedLayout: boolean
+  activeSeriesSpreadPickerNumber: number | null
+  selectedSpreadSectionButton: SportsGamesButton | null
+  selectedTotalSectionButton: SportsGamesButton | null
+}) {
+  const seriesSpreadSegmentOptions = useMemo(() => {
+    if (!hasEsportsSegmentedLayout) {
+      return [] as Array<{
+        number: number
+        conditionIds: string[]
+        buttonsByConditionId: Map<string, SportsGamesButton[]>
+      }>
     }
 
-    for (const section of SECTION_ORDER) {
-      const conditionIds = Array.from(new Set(groupedButtons[section.key].map(button => button.conditionId)))
-      volumes[section.key] = conditionIds.reduce((sum, conditionId) => {
-        const market = byConditionId.get(conditionId)
-        return sum + (Number(market?.volume ?? 0) || 0)
-      }, 0)
+    const byNumber = new Map<number, {
+      number: number
+      conditionIds: string[]
+      buttonsByConditionId: Map<string, SportsGamesButton[]>
+    }>()
+
+    groupedButtons.spread.forEach((button) => {
+      const market = detailMarketByConditionId.get(button.conditionId) ?? null
+      const number = parseEsportsSegmentNumber(market)
+      if (number == null) {
+        return
+      }
+
+      const existing = byNumber.get(number)
+      if (existing) {
+        if (!existing.conditionIds.includes(button.conditionId)) {
+          existing.conditionIds.push(button.conditionId)
+        }
+        const currentButtons = existing.buttonsByConditionId.get(button.conditionId) ?? []
+        currentButtons.push(button)
+        existing.buttonsByConditionId.set(button.conditionId, currentButtons)
+        return
+      }
+
+      byNumber.set(number, {
+        number,
+        conditionIds: [button.conditionId],
+        buttonsByConditionId: new Map([[button.conditionId, [button]]]),
+      })
+    })
+
+    return Array.from(byNumber.values())
+      .map(option => ({
+        ...option,
+        buttonsByConditionId: new Map(
+          Array.from(option.buttonsByConditionId.entries())
+            .map(([conditionId, buttons]) => [conditionId, sortSectionButtons('spread', buttons)] as const),
+        ),
+      }))
+      .sort((left, right) => left.number - right.number)
+  }, [detailMarketByConditionId, groupedButtons.spread, hasEsportsSegmentedLayout])
+  const activeSeriesSpreadSegmentOption = useMemo(() => {
+    if (seriesSpreadSegmentOptions.length === 0) {
+      return null
     }
 
-    return volumes
-  }, [activeCard.detailMarkets, groupedButtons])
-
-  const sectionConditionIdsByKey = useMemo<Record<EventSectionKey, Set<string>>>(() => {
-    return {
-      moneyline: new Set(groupedButtons.moneyline.map(button => button.conditionId)),
-      spread: new Set(groupedButtons.spread.map(button => button.conditionId)),
-      total: new Set(groupedButtons.total.map(button => button.conditionId)),
-      btts: new Set(groupedButtons.btts.map(button => button.conditionId)),
+    if (activeSeriesSpreadPickerNumber != null) {
+      const byPickerNumber = seriesSpreadSegmentOptions.find(option => option.number === activeSeriesSpreadPickerNumber)
+      if (byPickerNumber) {
+        return byPickerNumber
+      }
     }
-  }, [groupedButtons])
+
+    const selectedMarket = selectedSpreadSectionButton
+      ? detailMarketByConditionId.get(selectedSpreadSectionButton.conditionId) ?? null
+      : null
+    const selectedNumber = parseEsportsSegmentNumber(selectedMarket)
+    if (selectedNumber != null) {
+      return seriesSpreadSegmentOptions.find(option => option.number === selectedNumber)
+        ?? seriesSpreadSegmentOptions[0]
+        ?? null
+    }
+
+    return seriesSpreadSegmentOptions[0] ?? null
+  }, [
+    activeSeriesSpreadPickerNumber,
+    detailMarketByConditionId,
+    selectedSpreadSectionButton,
+    seriesSpreadSegmentOptions,
+  ])
+  const activeSeriesSpreadSegmentNumber = activeSeriesSpreadSegmentOption?.number ?? null
+  const activeSeriesSpreadConditionId = useMemo(() => {
+    if (!activeSeriesSpreadSegmentOption) {
+      return null
+    }
+
+    const currentSpreadConditionId = selectedSpreadSectionButton?.conditionId ?? null
+    if (
+      currentSpreadConditionId
+      && activeSeriesSpreadSegmentOption.buttonsByConditionId.has(currentSpreadConditionId)
+    ) {
+      return currentSpreadConditionId
+    }
+
+    return activeSeriesSpreadSegmentOption.conditionIds[0] ?? null
+  }, [activeSeriesSpreadSegmentOption, selectedSpreadSectionButton])
+  const seriesSpreadSegmentPickerOptions = useMemo(
+    () => seriesSpreadSegmentOptions.map(option => ({
+      key: `spread-segment-${option.number}`,
+      label: `${option.number}`,
+      number: option.number,
+    })),
+    [seriesSpreadSegmentOptions],
+  )
+  const seriesTotalLinePickerOptions = useMemo(() => {
+    if (!hasEsportsSegmentedLayout) {
+      return [] as SportsLinePickerOption[]
+    }
+
+    const allowedConditionIds = new Set(groupedButtons.total.map(button => button.conditionId))
+    return buildLinePickerOptions(activeCard, 'total')
+      .filter(option => allowedConditionIds.has(option.conditionId))
+  }, [activeCard, groupedButtons.total, hasEsportsSegmentedLayout])
+  const activeSeriesTotalLineOption = useMemo(() => {
+    if (seriesTotalLinePickerOptions.length === 0) {
+      return null
+    }
+
+    if (selectedTotalSectionButton) {
+      return seriesTotalLinePickerOptions.find(option => option.conditionId === selectedTotalSectionButton.conditionId)
+        ?? seriesTotalLinePickerOptions[0]
+        ?? null
+    }
+
+    return seriesTotalLinePickerOptions[0] ?? null
+  }, [selectedTotalSectionButton, seriesTotalLinePickerOptions])
+  const activeSeriesTotalConditionId = activeSeriesTotalLineOption?.conditionId ?? null
+  const activeSeriesTotalLineValue = activeSeriesTotalLineOption?.lineValue ?? null
+  const seriesTotalPickerOptions = useMemo(
+    () => seriesTotalLinePickerOptions.map(option => ({
+      key: `total-line-${option.conditionId}`,
+      label: option.label,
+      number: option.lineValue,
+    })),
+    [seriesTotalLinePickerOptions],
+  )
+
+  return {
+    seriesSpreadSegmentOptions,
+    activeSeriesSpreadSegmentOption,
+    activeSeriesSpreadSegmentNumber,
+    activeSeriesSpreadConditionId,
+    seriesSpreadSegmentPickerOptions,
+    seriesTotalLinePickerOptions,
+    activeSeriesTotalLineOption,
+    activeSeriesTotalConditionId,
+    activeSeriesTotalLineValue,
+    seriesTotalPickerOptions,
+  }
+}
+
+export default function SportsEventCenter({
+  card,
+  marketViewCards = [],
+  relatedCards = [],
+  marketContextEnabled = false,
+  sportSlug,
+  sportLabel,
+  initialMarketSlug = null,
+  initialMarketViewKey = null,
+  vertical = 'sports',
+}: SportsEventCenterProps) {
+  const verticalConfig = getSportsVerticalConfig(vertical)
+  const locale = useLocale()
+  const site = useSiteIdentity()
+  const isMobile = useIsMobile()
+  const setOrderEvent = useOrder(state => state.setEvent)
+  const setOrderMarket = useOrder(state => state.setMarket)
+  const setOrderOutcome = useOrder(state => state.setOutcome)
+  const setOrderSide = useOrder(state => state.setSide)
+  const setIsMobileOrderPanelOpen = useOrder(state => state.setIsMobileOrderPanelOpen)
+  const openLivestream = useSportsLivestream(state => state.openStream)
+  const activeStreamUrl = useSportsLivestream(state => state.streamUrl)
+  const orderEventId = useOrder(state => state.event?.id ?? null)
+  const orderMarketConditionId = useOrder(state => state.market?.condition_id ?? null)
+  const orderOutcomeIndex = useOrder(state => state.outcome?.outcome_index ?? null)
+  const user = useUser()
+  const { querySelection, handleQuerySelectionChange } = useQuerySelection()
+  const oddsFormat = useOddsFormat()
+  const {
+    normalizedMarketViewCards,
+    activeMarketView,
+    setActiveMarketViewKey,
+  } = useActiveMarketView({ card, marketViewCards, initialMarketSlug, initialMarketViewKey })
+
+  const ownerAddress = user?.proxy_wallet_address && user.proxy_wallet_status === 'deployed'
+    ? user.proxy_wallet_address
+    : null
+  const heroCard = card
+  const hasMultipleMarketViews = normalizedMarketViewCards.length > 1
+  const {
+    activeCard,
+    heroGroupedButtons,
+    segmentLabel,
+    segmentPluralLabel,
+    isHalftimeResultView,
+    baseUsesSectionLayout,
+    hasEsportsSegmentedLayout,
+  } = useDerivedActiveCard({ card, activeMarketView, vertical })
+  const { detailMarketByConditionId, buttonPriceCentsByKey } = useActiveCardPriceMap(activeCard)
+  const {
+    esportsSegmentTabNumbers,
+    activeEsportsSegmentTabKey,
+    setActiveEsportsSegmentTabKey,
+    activeEsportsSegmentNumber,
+    activeSeriesPreviewSegmentNumber,
+    setActiveSeriesPreviewSegmentNumber,
+    activeSeriesSpreadPickerNumber,
+    setActiveSeriesSpreadPickerNumber,
+  } = useEsportsSegmentTabState({ activeCard, hasEsportsSegmentedLayout, initialMarketSlug })
+  const usesSectionLayout = baseUsesSectionLayout && (!hasEsportsSegmentedLayout || activeEsportsSegmentTabKey === 'series')
+
+  const { data: userPositions } = useUserPositionsQuery({ ownerAddress, activeCardId: activeCard.id })
+
+  const {
+    claimedConditionIds,
+    setClaimedConditionIds,
+    redeemSectionKey,
+    setRedeemSectionKey,
+    redeemDefaultConditionId,
+    setRedeemDefaultConditionId,
+  } = useRedeemModalState(activeCard.id)
+
+  const formatButtonOdds = useFormatButtonOdds(oddsFormat)
+
+  const {
+    groupedButtons,
+    buttonByConditionAndOutcome,
+    firstButtonByConditionId,
+    availableSections,
+    sectionResolvedByKey,
+  } = useGroupedButtons({ activeCard, detailMarketByConditionId, hasEsportsSegmentedLayout })
+
+  const claimGroupsBySection = useClaimGroupsBySection({
+    activeCard,
+    buttonByConditionAndOutcome,
+    claimedConditionIds,
+    detailMarketByConditionId,
+    firstButtonByConditionId,
+    userPositions,
+  })
+
+  const marketSlugToButtonKey = useMarketSlugToButtonKey({
+    activeCard,
+    querySelection,
+    initialMarketSlug,
+  })
+
+  const {
+    auxiliaryMarketCards,
+    renderedAuxiliaryMarketCards,
+    seriesPreviewSegmentWinnerPanels,
+    activeSeriesPreviewSegmentWinnerPanel,
+    auxiliaryPanelKeyByButtonKey,
+    seriesWinnerSegmentPickerOptions,
+  } = useAuxiliaryMarketCards({
+    activeCard,
+    baseUsesSectionLayout,
+    hasEsportsSegmentedLayout,
+    activeEsportsSegmentTabKey,
+    activeEsportsSegmentNumber,
+    activeSeriesPreviewSegmentNumber,
+  })
+  const auxiliaryPanelsForSelectionForState = auxiliaryMarketCards
+  const {
+    selectedButtonBySection,
+    setSelectedButtonBySection,
+    selectedAuxiliaryButtonByConditionId,
+    setSelectedAuxiliaryButtonByConditionId,
+    activeTradeButtonKey,
+    setActiveTradeButtonKey,
+    openSectionKey,
+    setOpenSectionKey,
+    openAuxiliaryConditionId,
+    setOpenAuxiliaryConditionId,
+    tabBySection,
+    setTabBySection,
+    tabByAuxiliaryConditionId,
+    setTabByAuxiliaryConditionId,
+  } = useSelectionState({
+    activeCard,
+    auxiliaryPanelsForSelection: auxiliaryPanelsForSelectionForState,
+    detailMarketByConditionId,
+    groupedButtons,
+    usesSectionLayout,
+    marketSlugToButtonKey,
+    renderedAuxiliaryMarketCards,
+  })
+  const { selectedSpreadSectionButton, selectedTotalSectionButton } = useSelectedSectionButtons({
+    activeCard,
+    groupedButtons,
+    selectedButtonBySection,
+  })
+  const {
+    seriesSpreadSegmentOptions,
+    activeSeriesSpreadSegmentOption,
+    activeSeriesSpreadSegmentNumber,
+    activeSeriesSpreadConditionId,
+    seriesSpreadSegmentPickerOptions,
+    seriesTotalLinePickerOptions,
+    activeSeriesTotalLineOption,
+    activeSeriesTotalConditionId,
+    activeSeriesTotalLineValue,
+    seriesTotalPickerOptions,
+  } = useSeriesSegmentPickerData({
+    activeCard,
+    groupedButtons,
+    detailMarketByConditionId,
+    hasEsportsSegmentedLayout,
+    activeSeriesSpreadPickerNumber,
+    selectedSpreadSectionButton,
+    selectedTotalSectionButton,
+  })
+  const auxiliaryPanelsForSelection = auxiliaryMarketCards
+  const {
+    updateSectionSelection,
+    handlePickSeriesPreviewSegmentNumber,
+    handlePickSeriesSpreadSegmentNumber,
+    handlePickSeriesTotalLineValue,
+    resolveSeriesSpreadSelectedButtonKey,
+    resolveSeriesTotalSelectedButtonKey,
+  } = useSectionActions({
+    isMobile,
+    setIsMobileOrderPanelOpen,
+    setSelectedButtonBySection,
+    setActiveTradeButtonKey,
+    setOpenSectionKey,
+    setOpenAuxiliaryConditionId,
+    setActiveSeriesPreviewSegmentNumber,
+    setActiveSeriesSpreadPickerNumber,
+    seriesSpreadSegmentOptions,
+    seriesTotalLinePickerOptions,
+    selectedSpreadSectionButton,
+    selectedTotalSectionButton,
+    activeSeriesSpreadSegmentOption,
+    activeSeriesSpreadConditionId,
+    activeSeriesTotalLineOption,
+  })
+
+  useSeriesSpreadPickerSync({
+    selectedSpreadSectionButton,
+    detailMarketByConditionId,
+    setActiveSeriesSpreadPickerNumber,
+  })
+
+  useEsportsSegmentTabKeySync({
+    hasEsportsSegmentedLayout,
+    marketSlugToButtonKey,
+    activeCard,
+    detailMarketByConditionId,
+    setActiveEsportsSegmentTabKey,
+  })
+
+  const moneylineButtonKey = selectedButtonBySection.moneyline ?? groupedButtons.moneyline[0]?.key ?? null
+  const {
+    orderSelectionSyncKey,
+    fallbackButtonFromOrderState,
+    activeTradeContext,
+    activeTradeHeaderContext,
+    orderPanelOutcomeLabelOverrides,
+    orderPanelOutcomeAccentOverrides,
+    activeTradePrimaryOutcomeIndex,
+  } = useActiveTradeContext({
+    activeCard,
+    usesSectionLayout,
+    activeTradeButtonKey,
+    openSectionKey,
+    openAuxiliaryConditionId,
+    selectedButtonBySection,
+    selectedAuxiliaryButtonByConditionId,
+    marketSlugToButtonKey,
+    renderedAuxiliaryMarketCards,
+    moneylineButtonKey,
+    orderEventId,
+    orderMarketConditionId,
+    orderOutcomeIndex,
+  })
+  const pageAboutMarket = activeTradeHeaderContext?.market ?? activeTradeContext?.market ?? null
+
+  const activeTradeContextButtonKey = activeTradeContext?.button.key ?? null
+
+  useOrderStateSync({
+    activeCard,
+    activeTradeContextButtonKey,
+    orderEventId,
+    orderMarketConditionId,
+    orderOutcomeIndex,
+    marketSlugToButtonKey,
+    fallbackButtonFromOrderState,
+    orderSelectionSyncKey,
+    usesSectionLayout,
+    detailMarketByConditionId,
+    auxiliaryPanelKeyByButtonKey,
+    setActiveTradeButtonKey,
+    setSelectedButtonBySection,
+    setSelectedAuxiliaryButtonByConditionId,
+    setOrderEvent,
+    setOrderMarket,
+    setOrderOutcome,
+    setOrderSide,
+  })
+
+  const {
+    sectionVolumes,
+    sectionConditionIdsByKey,
+    allCardConditionIds,
+    redeemSectionConfig,
+    redeemModalSections,
+    auxiliaryResolvedByConditionId,
+    auxiliaryClaimGroupsByConditionId,
+    handleOpenRedeemForCondition,
+  } = useSectionDerivedData({
+    activeCard,
+    groupedButtons,
+    claimGroupsBySection,
+    auxiliaryPanelsForSelection,
+    redeemSectionKey,
+    setRedeemDefaultConditionId,
+    setRedeemSectionKey,
+  })
 
   function resolveSectionButtons(sectionKey: EventSectionKey, preferredConditionId?: string | null) {
     const sectionButtons = groupedButtons[sectionKey]
@@ -3164,55 +3926,6 @@ export default function SportsEventCenter({
       ?? null
   const heroMoneylineSelectedButton = resolveSelectedButton(heroCard, heroMoneylineButtonKey)
   const graphConditionId = heroMoneylineSelectedButton?.conditionId ?? null
-  const allCardConditionIds = useMemo(
-    () => new Set(activeCard.detailMarkets.map(market => market.condition_id)),
-    [activeCard.detailMarkets],
-  )
-  const redeemSectionConfig = useMemo(
-    () => (redeemSectionKey ? SECTION_ORDER.find(section => section.key === redeemSectionKey) ?? null : null),
-    [redeemSectionKey],
-  )
-  const redeemModalSections = useMemo<SportsRedeemModalSection[]>(
-    () =>
-      SECTION_ORDER
-        .map(section => ({
-          key: section.key,
-          label: section.label,
-          groups: claimGroupsBySection[section.key],
-        }))
-        .filter(section => section.groups.length > 0),
-    [claimGroupsBySection],
-  )
-  const auxiliaryResolvedByConditionId = useMemo(
-    () => new Map(auxiliaryPanelsForSelection.map(entry => [
-      entry.key,
-      entry.markets.every(market => Boolean(market.is_resolved || market.condition?.resolved)),
-    ] as const)),
-    [auxiliaryPanelsForSelection],
-  )
-  const auxiliaryClaimGroupsByConditionId = useMemo(
-    () => new Map(claimGroupsBySection.moneyline.map(group => [group.conditionId, group] as const)),
-    [claimGroupsBySection],
-  )
-  const handleOpenRedeemForCondition = useCallback((conditionId: string) => {
-    const normalizedConditionId = conditionId.trim()
-    if (!normalizedConditionId) {
-      return
-    }
-
-    const matchedSection = SECTION_ORDER.find(section =>
-      claimGroupsBySection[section.key].some(group => group.conditionId === normalizedConditionId),
-    ) ?? SECTION_ORDER.find(section => sectionConditionIdsByKey[section.key].has(normalizedConditionId))
-    ?? SECTION_ORDER.find(section => claimGroupsBySection[section.key].length > 0)
-    ?? null
-
-    if (!matchedSection) {
-      return
-    }
-
-    setRedeemDefaultConditionId(normalizedConditionId)
-    setRedeemSectionKey(matchedSection.key)
-  }, [claimGroupsBySection, sectionConditionIdsByKey])
   const esportsSegmentTabs = hasEsportsSegmentedLayout
     ? [
         { key: 'series' as const, label: 'Series Lines' },
