@@ -1,13 +1,10 @@
 import type { InfiniteData } from '@tanstack/react-query'
-import type { ReactNode } from 'react'
-import type { EventOrderPanelOutcomeSelectedAccent } from '@/app/[locale]/(platform)/event/[slug]/_components/EventOrderPanelOutcomeButton'
+import type { ConditionSharesMap, EventOrderPanelFormProps, ResolveDisplayOutcomeLabel } from '@/app/[locale]/(platform)/event/[slug]/_types/EventOrderPanelTypes'
 import type { PortfolioUserOpenOrder } from '@/app/[locale]/(platform)/portfolio/_types/PortfolioOpenOrdersTypes'
-import type { OddsFormat } from '@/lib/odds-format'
 import type { SafeTransactionRequestPayload } from '@/lib/safe/transactions'
 import type { Event, Market, Outcome, UserPosition } from '@/types'
 import { useAppKitAccount } from '@reown/appkit/react'
 import { useQueryClient } from '@tanstack/react-query'
-import { CheckIcon, TriangleAlertIcon } from 'lucide-react'
 import { useExtracted, useLocale } from 'next-intl'
 import Form from 'next/form'
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
@@ -18,14 +15,11 @@ import { getSafeNonceAction, submitSafeTransactionAction } from '@/app/[locale]/
 import { useTradingOnboarding } from '@/app/[locale]/(platform)/_providers/TradingOnboardingProvider'
 import { useOrderBookSummaries } from '@/app/[locale]/(platform)/event/[slug]/_components/EventOrderBook'
 import EventOrderPanelBuySellTabs from '@/app/[locale]/(platform)/event/[slug]/_components/EventOrderPanelBuySellTabs'
-import EventOrderPanelEarnings from '@/app/[locale]/(platform)/event/[slug]/_components/EventOrderPanelEarnings'
-import EventOrderPanelInput from '@/app/[locale]/(platform)/event/[slug]/_components/EventOrderPanelInput'
-import EventOrderPanelLimitControls from '@/app/[locale]/(platform)/event/[slug]/_components/EventOrderPanelLimitControls'
 import EventOrderPanelMarketInfo from '@/app/[locale]/(platform)/event/[slug]/_components/EventOrderPanelMarketInfo'
 import EventOrderPanelMobileMarketInfo from '@/app/[locale]/(platform)/event/[slug]/_components/EventOrderPanelMobileMarketInfo'
-import EventOrderPanelOutcomeButton from '@/app/[locale]/(platform)/event/[slug]/_components/EventOrderPanelOutcomeButton'
-import EventOrderPanelSubmitButton from '@/app/[locale]/(platform)/event/[slug]/_components/EventOrderPanelSubmitButton'
-import EventOrderPanelUserShares from '@/app/[locale]/(platform)/event/[slug]/_components/EventOrderPanelUserShares'
+import EventOrderPanelOrderInput from '@/app/[locale]/(platform)/event/[slug]/_components/EventOrderPanelOrderInput'
+import EventOrderPanelOutcomeSelector from '@/app/[locale]/(platform)/event/[slug]/_components/EventOrderPanelOutcomeSelector'
+import EventOrderPanelResolvedMarketDisplay from '@/app/[locale]/(platform)/event/[slug]/_components/EventOrderPanelResolvedMarketDisplay'
 import { handleOrderCancelledFeedback, handleOrderErrorFeedback, handleOrderSuccessFeedback, handleValidationError } from '@/app/[locale]/(platform)/event/[slug]/_components/feedback'
 import { useEventOrderPanelOpenOrders } from '@/app/[locale]/(platform)/event/[slug]/_hooks/useEventOrderPanelOpenOrders'
 import { useEventOrderPanelPositions } from '@/app/[locale]/(platform)/event/[slug]/_hooks/useEventOrderPanelPositions'
@@ -36,7 +30,6 @@ import { inferResolvedTweetMarketOutcome, isTweetMarketsEvent } from '@/app/[loc
 import {
   resolveResolvedOrderPanelDisplay,
 } from '@/app/[locale]/(platform)/event/[slug]/_utils/resolved-order-panel-market'
-import { Button } from '@/components/ui/button'
 import { useAffiliateOrderMetadata } from '@/hooks/useAffiliateOrderMetadata'
 import { useAppKit } from '@/hooks/useAppKit'
 import { SAFE_BALANCE_QUERY_KEY, useBalance } from '@/hooks/useBalance'
@@ -74,21 +67,6 @@ import { isUserRejectedRequestError, normalizeAddress } from '@/lib/wallet'
 import { useNotifications } from '@/stores/useNotifications'
 import { useAmountAsNumber, useIsLimitOrder, useNoPrice, useOrder, useYesPrice } from '@/stores/useOrder'
 import { useUser } from '@/stores/useUser'
-
-interface EventOrderPanelFormProps {
-  isMobile: boolean
-  event: Event
-  initialMarket?: Market | null
-  initialOutcome?: Outcome | null
-  desktopMarketInfo?: ReactNode
-  mobileMarketInfo?: ReactNode
-  primaryOutcomeIndex?: number | null
-  oddsFormat?: OddsFormat
-  outcomeButtonStyleVariant?: 'default' | 'sports3d'
-  outcomeLabelOverrides?: Partial<Record<number, string>>
-  outcomeAccentOverrides?: Partial<Record<number, EventOrderPanelOutcomeSelectedAccent>>
-  optimisticallyClaimedConditionIds?: Record<string, true>
-}
 
 function resolveIndexSetFromOutcomeIndex(outcomeIndex: number | undefined) {
   if (outcomeIndex === OUTCOME_INDEX.YES) {
@@ -165,8 +143,6 @@ function getHydratedClientSnapshot() {
 function getHydratedServerSnapshot() {
   return false
 }
-
-type ConditionSharesMap = Record<string, Record<typeof OUTCOME_INDEX.YES | typeof OUTCOME_INDEX.NO, number>>
 
 function useUserSharesStoreSync({
   makerAddress,
@@ -545,12 +521,6 @@ function useOrderBookComputations({
     buyPayoutSummary,
   }
 }
-
-type ResolveDisplayOutcomeLabel = (
-  outcomeIndex: number | null | undefined,
-  outcomeText: string | null | undefined,
-  fallbackLabel: string,
-) => string
 
 function useClaimablePositions({
   activeMarket,
@@ -1781,47 +1751,19 @@ export default function EventOrderPanelForm({
       )}
       {isResolvedMarket
         ? (
-            <div className="flex flex-col items-center gap-3 px-2 py-4 text-center">
-              <div className="flex size-10 items-center justify-center rounded-full bg-primary">
-                <CheckIcon className="size-7 text-background" strokeWidth={3} />
-              </div>
-              <div className="text-lg font-bold text-primary">
-                {t('Outcome:')}
-                {' '}
-                {resolvedOutcomeLabel}
-              </div>
-              {((!isSingleMarket || shouldShowResolvedSportsSubtitle) && resolvedMarketTitle) && (
-                <div className="text-sm text-muted-foreground">{resolvedMarketTitle}</div>
-              )}
-              {hasClaimableWinnings && (
-                <div className="mt-2 w-full space-y-3 text-left">
-                  <div className="w-full border-t border-border" />
-                  <p className="text-center text-base font-semibold text-foreground">{t('Your Earnings')}</p>
-                  <div className="space-y-1.5 text-sm">
-                    <div className="flex items-center justify-between gap-4">
-                      <span className="text-muted-foreground">{t('Position')}</span>
-                      <span className="text-right font-medium text-foreground">{claimPositionLabel}</span>
-                    </div>
-                    <div className="flex items-center justify-between gap-4">
-                      <span className="text-muted-foreground">{t('Value per share')}</span>
-                      <span className="text-right font-medium text-foreground">{claimValuePerShareLabel}</span>
-                    </div>
-                    <div className="flex items-center justify-between gap-4">
-                      <span className="text-muted-foreground">{t('Total')}</span>
-                      <span className="text-right font-medium text-foreground">{claimTotalLabel}</span>
-                    </div>
-                  </div>
-                  <Button
-                    type="button"
-                    className="h-10 w-full"
-                    onClick={handleClaimWinnings}
-                    disabled={isClaimSubmitting || positionsQuery.isLoading}
-                  >
-                    {isClaimSubmitting ? t('Submitting...') : t('Claim winnings')}
-                  </Button>
-                </div>
-              )}
-            </div>
+            <EventOrderPanelResolvedMarketDisplay
+              resolvedOutcomeLabel={resolvedOutcomeLabel}
+              isSingleMarket={isSingleMarket}
+              shouldShowResolvedSportsSubtitle={shouldShowResolvedSportsSubtitle}
+              resolvedMarketTitle={resolvedMarketTitle}
+              hasClaimableWinnings={hasClaimableWinnings}
+              claimPositionLabel={claimPositionLabel}
+              claimValuePerShareLabel={claimValuePerShareLabel}
+              claimTotalLabel={claimTotalLabel}
+              isClaimSubmitting={isClaimSubmitting}
+              isPositionsLoading={positionsQuery.isLoading}
+              onClaimWinnings={handleClaimWinnings}
+            />
           )
         : (
             <>
@@ -1844,163 +1786,80 @@ export default function EventOrderPanelForm({
                 onFocusInput={focusInput}
               />
 
-              <div className="mb-2 flex gap-2">
-                <EventOrderPanelOutcomeButton
-                  variant="yes"
-                  price={primaryPrice}
-                  label={resolveDisplayOutcomeLabel(
-                    normalizedPrimaryOutcomeIndex,
-                    primaryOutcome?.outcome_text,
-                    t('Yes'),
-                  )}
-                  isSelected={activeOutcome?.outcome_index === normalizedPrimaryOutcomeIndex}
-                  oddsFormat={oddsFormat}
-                  styleVariant={outcomeButtonStyleVariant}
-                  selectedAccent={outcomeAccentOverrides[normalizedPrimaryOutcomeIndex] ?? null}
-                  onSelect={() => handleOutcomeSelect(primaryOutcome)}
-                />
-                <EventOrderPanelOutcomeButton
-                  variant="no"
-                  price={secondaryPrice}
-                  label={resolveDisplayOutcomeLabel(
-                    normalizedSecondaryOutcomeIndex,
-                    secondaryOutcome?.outcome_text,
-                    t('No'),
-                  )}
-                  isSelected={activeOutcome?.outcome_index === normalizedSecondaryOutcomeIndex}
-                  oddsFormat={oddsFormat}
-                  styleVariant={outcomeButtonStyleVariant}
-                  selectedAccent={outcomeAccentOverrides[normalizedSecondaryOutcomeIndex] ?? null}
-                  onSelect={() => handleOutcomeSelect(secondaryOutcome)}
-                />
-              </div>
-
-              {isLimitOrder
-                ? (
-                    <div className="mb-4">
-                      {state.side === ORDER_SIDE.SELL && (
-                        <EventOrderPanelUserShares
-                          yesShares={availableYesTokenShares}
-                          noShares={availableNoTokenShares}
-                          activeOutcome={outcomeIndex}
-                        />
-                      )}
-                      <EventOrderPanelLimitControls
-                        side={state.side}
-                        limitPrice={state.limitPrice}
-                        limitShares={state.limitShares}
-                        limitExpirationEnabled={state.limitExpirationEnabled}
-                        limitExpirationOption={state.limitExpirationOption}
-                        limitExpirationTimestamp={state.limitExpirationTimestamp}
-                        isLimitOrder={isLimitOrder}
-                        matchingShares={limitMatchingShares}
-                        availableShares={selectedShares}
-                        showLimitMinimumWarning={shouldShowLimitMinimumWarning}
-                        shouldShakeShares={shouldShakeLimitShares}
-                        limitSharesRef={limitSharesInputRef}
-                        onLimitPriceChange={handleLimitPriceChange}
-                        onLimitSharesChange={handleLimitSharesChange}
-                        onLimitExpirationEnabledChange={state.setLimitExpirationEnabled}
-                        onLimitExpirationOptionChange={state.setLimitExpirationOption}
-                        onLimitExpirationTimestampChange={state.setLimitExpirationTimestamp}
-                        onAmountUpdateFromLimit={state.setAmount}
-                      />
-                    </div>
-                  )
-                : (
-                    <>
-                      {state.side === ORDER_SIDE.SELL
-                        ? (
-                            <EventOrderPanelUserShares
-                              yesShares={availableYesPositionShares}
-                              noShares={availableNoPositionShares}
-                              activeOutcome={outcomeIndex}
-                            />
-                          )
-                        : <div className="mb-4"></div>}
-                      <EventOrderPanelInput
-                        isMobile={isMobile}
-                        side={state.side}
-                        amount={state.amount}
-                        amountNumber={amountNumber}
-                        availableShares={selectedShares}
-                        balance={balance}
-                        isBalanceLoading={isLoadingBalance}
-                        inputRef={state.inputRef}
-                        onAmountChange={handleAmountChange}
-                        shouldShake={shouldShakeInput}
-                      />
-                      <div
-                        className={cn(
-                          'overflow-hidden transition-all duration-500 ease-in-out',
-                          shouldShowEarnings
-                            ? 'max-h-96 translate-y-0 opacity-100'
-                            : 'pointer-events-none max-h-0 -translate-y-2 opacity-0',
-                        )}
-                        aria-hidden={!shouldShowEarnings}
-                      >
-                        <EventOrderPanelEarnings
-                          isMobile={isMobile}
-                          side={state.side}
-                          sellAmountLabel={sellAmountLabel}
-                          avgSellPriceLabel={avgSellPriceLabel}
-                          avgBuyPriceLabel={avgBuyPriceLabel}
-                          avgSellPriceCents={avgSellPriceCentsValue}
-                          avgBuyPriceCents={avgBuyPriceCentsValue}
-                          buyPayout={buyPayoutSummary.payout}
-                          buyProfit={buyPayoutSummary.profit}
-                          buyChangePct={buyPayoutSummary.changePct}
-                          buyMultiplier={buyPayoutSummary.multiplier}
-                        />
-                      </div>
-                      {shouldShowResolvedMarketMinimumWarning && (
-                        <div
-                          className={`
-                            mt-3 flex animate-order-shake items-center justify-center gap-2 pb-1 text-sm font-semibold
-                            text-orange-500
-                          `}
-                        >
-                          <TriangleAlertIcon className="size-4" />
-                          {t('Market buys must be at least $1')}
-                        </div>
-                      )}
-                      {shouldShowResolvedNoLiquidityWarning && (
-                        <div
-                          className={`
-                            mt-3 flex animate-order-shake items-center justify-center gap-2 pb-1 text-sm font-semibold
-                            text-orange-500
-                          `}
-                        >
-                          <TriangleAlertIcon className="size-4" />
-                          {t('No liquidity for this market order')}
-                        </div>
-                      )}
-                    </>
-                  )}
-
-              {(showInsufficientSharesWarning || showInsufficientBalanceWarning || showAmountTooLowWarning) && (
-                <div
-                  className={`
-                    mt-2 mb-3 flex animate-order-shake items-center justify-center gap-2 text-sm font-semibold
-                    text-orange-500
-                  `}
-                >
-                  <TriangleAlertIcon className="size-4" />
-                  {showAmountTooLowWarning
-                    ? t('Amount too low')
-                    : showInsufficientBalanceWarning
-                      ? t('Insufficient USDC balance')
-                      : t('Insufficient shares for this order')}
-                </div>
-              )}
-
-              <EventOrderPanelSubmitButton
-                type={!isInteractiveWalletReady || shouldShowDepositCta ? 'button' : 'submit'}
-                isLoading={state.isLoading}
-                isDisabled={state.isLoading}
-                selectedAccent={selectedSubmitAccent}
+              <EventOrderPanelOutcomeSelector
+                primaryPrice={primaryPrice}
+                secondaryPrice={secondaryPrice}
+                primaryLabel={resolveDisplayOutcomeLabel(
+                  normalizedPrimaryOutcomeIndex,
+                  primaryOutcome?.outcome_text,
+                  t('Yes'),
+                )}
+                secondaryLabel={resolveDisplayOutcomeLabel(
+                  normalizedSecondaryOutcomeIndex,
+                  secondaryOutcome?.outcome_text,
+                  t('No'),
+                )}
+                primaryIsSelected={activeOutcome?.outcome_index === normalizedPrimaryOutcomeIndex}
+                secondaryIsSelected={activeOutcome?.outcome_index === normalizedSecondaryOutcomeIndex}
+                oddsFormat={oddsFormat}
                 styleVariant={outcomeButtonStyleVariant}
-                onClick={(event) => {
+                primarySelectedAccent={outcomeAccentOverrides[normalizedPrimaryOutcomeIndex] ?? null}
+                secondarySelectedAccent={outcomeAccentOverrides[normalizedSecondaryOutcomeIndex] ?? null}
+                onSelectPrimary={() => handleOutcomeSelect(primaryOutcome)}
+                onSelectSecondary={() => handleOutcomeSelect(secondaryOutcome)}
+              />
+
+              <EventOrderPanelOrderInput
+                isMobile={isMobile}
+                side={state.side}
+                isLimitOrder={isLimitOrder}
+                amount={state.amount}
+                amountNumber={amountNumber}
+                availableShares={selectedShares}
+                availableYesTokenShares={availableYesTokenShares}
+                availableNoTokenShares={availableNoTokenShares}
+                availableYesPositionShares={availableYesPositionShares}
+                availableNoPositionShares={availableNoPositionShares}
+                outcomeIndex={outcomeIndex}
+                balance={balance}
+                isBalanceLoading={isLoadingBalance}
+                inputRef={state.inputRef}
+                shouldShakeInput={shouldShakeInput}
+                shouldShowEarnings={shouldShowEarnings}
+                sellAmountLabel={sellAmountLabel}
+                avgSellPriceLabel={avgSellPriceLabel}
+                avgBuyPriceLabel={avgBuyPriceLabel}
+                avgSellPriceCentsValue={avgSellPriceCentsValue}
+                avgBuyPriceCentsValue={avgBuyPriceCentsValue}
+                buyPayoutSummary={buyPayoutSummary}
+                shouldShowResolvedMarketMinimumWarning={shouldShowResolvedMarketMinimumWarning}
+                shouldShowResolvedNoLiquidityWarning={shouldShowResolvedNoLiquidityWarning}
+                showInsufficientSharesWarning={showInsufficientSharesWarning}
+                showInsufficientBalanceWarning={showInsufficientBalanceWarning}
+                showAmountTooLowWarning={showAmountTooLowWarning}
+                limitPrice={state.limitPrice}
+                limitShares={state.limitShares}
+                limitExpirationEnabled={state.limitExpirationEnabled}
+                limitExpirationOption={state.limitExpirationOption}
+                limitExpirationTimestamp={state.limitExpirationTimestamp}
+                limitMatchingShares={limitMatchingShares}
+                shouldShowLimitMinimumWarning={shouldShowLimitMinimumWarning}
+                shouldShakeLimitShares={shouldShakeLimitShares}
+                limitSharesRef={limitSharesInputRef}
+                onAmountChange={handleAmountChange}
+                onLimitPriceChange={handleLimitPriceChange}
+                onLimitSharesChange={handleLimitSharesChange}
+                onLimitExpirationEnabledChange={state.setLimitExpirationEnabled}
+                onLimitExpirationOptionChange={state.setLimitExpirationOption}
+                onLimitExpirationTimestampChange={state.setLimitExpirationTimestamp}
+                onAmountUpdateFromLimit={state.setAmount}
+                isInteractiveWalletReady={isInteractiveWalletReady}
+                shouldShowDepositCta={shouldShowDepositCta}
+                isLoading={state.isLoading}
+                selectedSubmitAccent={selectedSubmitAccent}
+                outcomeButtonStyleVariant={outcomeButtonStyleVariant}
+                submitButtonLabel={submitButtonLabel}
+                onSubmitButtonClick={(event) => {
                   if (!isInteractiveWalletReady) {
                     void open()
                     return
@@ -2012,7 +1871,6 @@ export default function EventOrderPanelForm({
                   }
                   state.setLastMouseEvent(event)
                 }}
-                label={submitButtonLabel}
               />
             </>
           )}
