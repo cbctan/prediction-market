@@ -1,6 +1,8 @@
 import type { Event } from '@/types'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import type { ReactNode } from 'react'
 import EventShare from '@/app/[locale]/(platform)/event/[slug]/_components/EventShare'
 
 const mocks = vi.hoisted(() => ({
@@ -122,6 +124,22 @@ function createDeferredPromise<T>() {
   }
 }
 
+function renderWithQueryClient(component: ReactNode) {
+  const queryClient = new QueryClient({
+    defaultOptions: {
+      queries: {
+        retry: false,
+      },
+    },
+  })
+
+  return render(
+    <QueryClientProvider client={queryClient}>
+      {component}
+    </QueryClientProvider>,
+  )
+}
+
 describe('eventShare', () => {
   const writeText = vi.fn()
 
@@ -159,7 +177,7 @@ describe('eventShare', () => {
       },
     })
 
-    render(<EventShare event={createEvent()} />)
+    renderWithQueryClient(<EventShare event={createEvent()} />)
 
     await userEvent.click(screen.getByRole('button', { name: 'Copy event link' }))
 
@@ -192,7 +210,7 @@ describe('eventShare', () => {
       },
     })
 
-    render(<EventShare event={createEvent()} />)
+    renderWithQueryClient(<EventShare event={createEvent()} />)
 
     const shareButton = screen.getByRole('button', { name: 'Copy event link' })
 
@@ -226,7 +244,7 @@ describe('eventShare', () => {
         },
       })
 
-    render(<EventShare event={createEvent()} />)
+    renderWithQueryClient(<EventShare event={createEvent()} />)
 
     const shareButton = screen.getByRole('button', { name: 'Copy event link' })
 
@@ -244,14 +262,20 @@ describe('eventShare', () => {
     })
 
     await waitFor(() => {
-      expect(mocks.maybeShowAffiliateToast).toHaveBeenCalledTimes(1)
+      expect(mocks.maybeShowAffiliateToast).toHaveBeenNthCalledWith(1, {
+        affiliateCode: 'abc123',
+        affiliateSharePercent: null,
+        tradeFeePercent: null,
+        siteName: 'Kuest',
+        context: 'link',
+      })
     })
 
     await userEvent.click(shareButton)
 
     await waitFor(() => {
       expect(mocks.fetchAffiliateSettingsFromAPI).toHaveBeenCalledTimes(2)
-      expect(mocks.maybeShowAffiliateToast).toHaveBeenCalledWith({
+      expect(mocks.maybeShowAffiliateToast).toHaveBeenNthCalledWith(2, {
         affiliateCode: 'abc123',
         affiliateSharePercent: 40,
         tradeFeePercent: 1,

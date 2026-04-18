@@ -1,4 +1,5 @@
 import type { Event } from '@/types'
+import { useQueryClient } from '@tanstack/react-query'
 import { CheckIcon, ShareIcon } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { getMarketSeriesLabel } from '@/app/[locale]/(platform)/event/[slug]/_utils/EventChartUtils'
@@ -28,16 +29,16 @@ interface AffiliateToastData {
   tradeFeePercent: number | null
 }
 
-function parseAffiliateToastData(result: Awaited<ReturnType<typeof fetchAffiliateSettingsFromAPI>>): AffiliateToastData {
-  if (!result.success) {
-    return {
-      affiliateSharePercent: null,
-      tradeFeePercent: null,
-    }
+function getEmptyAffiliateToastData(): AffiliateToastData {
+  return {
+    affiliateSharePercent: null,
+    tradeFeePercent: null,
   }
+}
 
-  const shareParsed = Number.parseFloat(result.data.affiliateSharePercent)
-  const feeParsed = Number.parseFloat(result.data.tradeFeePercent)
+function parseAffiliateToastData(result: { affiliateSharePercent: string, tradeFeePercent: string }): AffiliateToastData {
+  const shareParsed = Number.parseFloat(result.affiliateSharePercent)
+  const feeParsed = Number.parseFloat(result.tradeFeePercent)
 
   return {
     affiliateSharePercent: Number.isFinite(shareParsed) && shareParsed > 0 ? shareParsed : null,
@@ -125,61 +126,30 @@ function useAffiliateToastData({
   affiliateCode: string
   siteName: string
 }) {
-  const [affiliateSharePercent, setAffiliateSharePercent] = useState<number | null>(null)
-  const [tradeFeePercent, setTradeFeePercent] = useState<number | null>(null)
-  const [hasResolvedAffiliateToastData, setHasResolvedAffiliateToastData] = useState(false)
-  const affiliateToastDataRequestRef = useRef<Promise<AffiliateToastData> | null>(null)
-
-  useEffect(function resetAffiliateDataOnCodeChange() {
-    setAffiliateSharePercent(null)
-    setTradeFeePercent(null)
-    setHasResolvedAffiliateToastData(false)
-    affiliateToastDataRequestRef.current = null
-  }, [affiliateCode])
+  const queryClient = useQueryClient()
 
   const ensureAffiliateToastData = useCallback(async (): Promise<AffiliateToastData> => {
     if (!affiliateCode) {
-      return {
-        affiliateSharePercent: null,
-        tradeFeePercent: null,
-      }
+      return getEmptyAffiliateToastData()
     }
 
-    if (hasResolvedAffiliateToastData) {
-      return {
-        affiliateSharePercent,
-        tradeFeePercent,
-      }
+    try {
+      return await queryClient.fetchQuery({
+        queryKey: ['affiliate-toast-data', affiliateCode],
+        queryFn: async () => {
+          const result = await fetchAffiliateSettingsFromAPI()
+          if (!result.success) {
+            throw new Error(result.error.error)
+          }
+          return parseAffiliateToastData(result.data)
+        },
+        staleTime: Number.POSITIVE_INFINITY,
+      })
     }
-
-    if (affiliateToastDataRequestRef.current) {
-      return affiliateToastDataRequestRef.current
+    catch {
+      return getEmptyAffiliateToastData()
     }
-
-    const request = fetchAffiliateSettingsFromAPI()
-      .then((result) => {
-        const nextData = parseAffiliateToastData(result)
-        setAffiliateSharePercent(nextData.affiliateSharePercent)
-        setTradeFeePercent(nextData.tradeFeePercent)
-        setHasResolvedAffiliateToastData(result.success)
-        return nextData
-      })
-      .catch(() => {
-        const nextData = {
-          affiliateSharePercent: null,
-          tradeFeePercent: null,
-        }
-        setAffiliateSharePercent(nextData.affiliateSharePercent)
-        setTradeFeePercent(nextData.tradeFeePercent)
-        return nextData
-      })
-      .finally(() => {
-        affiliateToastDataRequestRef.current = null
-      })
-
-    affiliateToastDataRequestRef.current = request
-    return request
-  }, [affiliateCode, affiliateSharePercent, hasResolvedAffiliateToastData, tradeFeePercent])
+  }, [affiliateCode, queryClient])
 
   function prefetchAffiliateToastData() {
     if (!affiliateCode) {
